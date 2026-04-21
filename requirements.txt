@@ -1,0 +1,11 @@
+# QuantEdge — requirements entry point
+#
+# For most users (UI + backtest + factors + portfolio):
+#   pip install -r requirements-core.txt
+#
+# For prediction (LSTM) pages (optional heavy deps):
+#   pip install -r requirements-ml.txt     (includes core automatically)
+#
+# Legacy full install (all deps, ~4-6 GB):
+-r requirements-core.txt
+-r requirements-ml.txt

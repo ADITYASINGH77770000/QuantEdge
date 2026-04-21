@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+venv/
+.venv/
+frontend/node_modules/
+frontend/dist/
+data/cache/*.parquet
+data/exports/*.pdf
+data/exports/*.csv
+*.log
+.DS_Store

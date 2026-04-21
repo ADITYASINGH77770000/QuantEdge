@@ -1,0 +1,21 @@
+# ── requirements-ml.txt ───────────────────────────────────────────────────────
+# Heavy ML dependencies for prediction (LSTM/Transformer) and RL trader pages.
+# Download size: ~4–6 GB (TensorFlow + PyTorch + Transformers).
+# Only install this if you need pages 04_prediction.py or 14_rl_trader.py.
+#
+# Install (after core):  pip install -r requirements-ml.txt
+#
+# ⚠️  GPU recommended for RL training (stable-baselines3 PPO).
+#     CPU training is supported but slow for >1,000 episodes.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── includes core first ───────────────────────────────────────────────────────
+-r requirements-core.txt
+
+# ── Deep Learning (LSTM / Transformer prediction) ────────────────────────────
+tensorflow>=2.14.0
+xgboost>=2.1.0          # gradient boosted trees — also used in tabular prediction
+
+# ── Optional ML extras (prediction models)
+# Install the following only if you need heavy deep-learning models (LSTM/Transformer)
+# tensorflow>=2.14.0 is already included above for prediction workloads.
