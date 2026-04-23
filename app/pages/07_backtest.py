@@ -136,10 +136,34 @@ from app.data_engine import (
 )
 from utils.charts import equity_curve, drawdown_chart, metric_card_row
 from utils.config import cfg
+try:
+    from utils.theme import qe_neon_divider, qe_faq_section
+except ImportError:
+    from utils.theme import qe_neon_divider
+
+    def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
+        qe_neon_divider()
+        st.markdown(f"### {title}")
+        for question, answer in faqs:
+            st.markdown(
+                f"""
+                <div style="
+                    background: rgba(14,22,42,0.82);
+                    border: 1px solid rgba(11,224,255,0.18);
+                    border-radius: 12px;
+                    padding: 14px 16px;
+                    margin: 10px 0;
+                ">
+                  <div style="font-weight:700;color:#e8f4fd;margin-bottom:6px;">Q. {question}</div>
+                  <div style="color:var(--text-dim);line-height:1.55;">A. {answer}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 st.set_page_config(page_title="Backtest | QuantEdge", layout="wide")
 st.title("⚡ Strategy Backtester")
-st.caption("Walk-Forward Testing  ·  Monte Carlo  ·  Regime-Aware Signals  ·  Real Market Costs")
+qe_neon_divider()
 
 # ── Data controls ─────────────────────────────────────────────────────────────
 render_data_engine_controls("backtest")
@@ -439,3 +463,10 @@ if st.button("Run Backtest", type="primary"):
     with st.expander("Full Metrics Table"):
         st.dataframe(pd.DataFrame.from_dict(result.metrics, orient="index",
                                              columns=["Value"]), use_container_width=True)
+
+qe_faq_section("FAQs", [
+    ("What should I run first on the backtester?", "Start with the default strategy and review the equity curve, drawdown, and trade log before trying more advanced settings."),
+    ("Why do walk-forward and Monte Carlo matter?", "They check whether the strategy still works on unseen data and whether the result is robust or just lucky."),
+    ("How should I read the regime-aware mode?", "It switches strategy by market regime, so it is useful when one strategy performs well only in certain conditions."),
+    ("What is the main thing to watch?", "Focus on net performance after realistic costs, because a strategy that wins gross but fails after fees is not tradable."),
+])

@@ -23,6 +23,15 @@ from app.ui_pages._shared import (
 from core.data import returns
 from core.metrics import summary_table
 from utils.config import cfg
+try:
+    from utils.theme import qe_faq_section
+except ImportError:
+    def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
+        st.markdown("---")
+        st.markdown(f"### {title}")
+        for question, answer in faqs:
+            with st.expander(question):
+                st.write(answer)
 
 
 st.set_page_config(page_title="Dashboard | QuantEdge", page_icon="📈", layout="wide")
@@ -642,3 +651,10 @@ with st.container(border=True):
         use_container_width=True,
         height=280,
     )
+
+qe_faq_section("FAQs", [
+    ("What should I look at first on the dashboard?", "Start with the top metrics row and the latest OHLCV table. They give a quick read on trend, volatility, and recent market behavior."),
+    ("How does this dashboard help me trade?", "It condenses the current state of the symbol into one screen so you can compare trend, risk, and momentum before moving to deeper analysis pages."),
+    ("Why is the recent data table important?", "It shows the freshest sessions and helps you spot gaps, large candles, or unusual volume before trusting a signal."),
+    ("When should I switch to another page?", "Use the dashboard as the starting point, then move to signals, risk, or backtest once you want a more specific answer."),
+])

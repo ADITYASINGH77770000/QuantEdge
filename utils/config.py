@@ -24,6 +24,8 @@ class Config:
     SMTP_PORT: int = 587
 
     NEWS_API_KEY: str = os.getenv("NEWS_API_KEY", "")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
     ALPACA_API_KEY: str = os.getenv("ALPACA_API_KEY", "")
     ALPACA_SECRET_KEY: str = os.getenv("ALPACA_SECRET_KEY", "")
@@ -51,6 +53,8 @@ class Config:
         """Warn without crashing if optional keys are missing."""
         if not cls.NEWS_API_KEY:
             logger.warning("NEWS_API_KEY not set; sentiment will use demo data")
+        if not cls.GEMINI_API_KEY:
+            logger.warning("GEMINI_API_KEY not set; AI explainers will use fallback summaries")
         if not cls.GMAIL_PASSWORD:
             logger.warning("GMAIL_PASSWORD not set; email alerts disabled")
 

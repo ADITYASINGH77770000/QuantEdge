@@ -17,11 +17,35 @@ from app.data_engine import (
     render_single_ticker_input,
 )
 from core.prediction import rerun_prediction_inference, run_multi_model_prediction
+try:
+    from utils.theme import qe_neon_divider, qe_faq_section
+except ImportError:
+    from utils.theme import qe_neon_divider
+
+    def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
+        qe_neon_divider()
+        st.markdown(f"### {title}")
+        for question, answer in faqs:
+            st.markdown(
+                f"""
+                <div style="
+                    background: rgba(14,22,42,0.82);
+                    border: 1px solid rgba(11,224,255,0.18);
+                    border-radius: 12px;
+                    padding: 14px 16px;
+                    margin: 10px 0;
+                ">
+                  <div style="font-weight:700;color:#e8f4fd;margin-bottom:6px;">Q. {question}</div>
+                  <div style="color:var(--text-dim);line-height:1.55;">A. {answer}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 st.set_page_config(page_title="Prediction | QuantEdge", layout="wide")
 st.title("Prediction Studio")
-st.caption("LSTM, XGBoost, and Transformer forecasts combined into one ensemble view")
+qe_neon_divider()
 render_data_engine_controls("prediction")
 global_start = get_global_start_date()
 
@@ -237,3 +261,10 @@ if st.session_state[_HAS_RUN_KEY]:
 
         with transformer_tab:
             _render_model_tab(result, "Transformer")
+
+qe_faq_section("FAQs", [
+    ("What should I train first on this page?", "Start with the default ticker and run Train Models once. That builds the LSTM, XGBoost, and Transformer forecasts together so you can compare them side by side."),
+    ("Why is one model unavailable sometimes?", "Some backends may be missing in your environment or may fail on short histories. The ensemble still works with the remaining models, and the page shows which backend was used."),
+    ("When should I trust the ensemble forecast?", "Use it as a directional guide, not a guarantee. The forecast is most useful when model confidence is high and all three model lines are moving in the same direction."),
+    ("What is the best workflow here?", "Train once, review the ensemble chart, then use Refresh Forecast after changing the date range or inputs so you keep the trained models but update the prediction view."),
+])

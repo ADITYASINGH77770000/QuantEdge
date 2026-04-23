@@ -6,9 +6,16 @@ echo ========================================
 echo   QuantEdge -- Setup Script (Windows)
 echo ========================================
 
+set "PYTHON_CMD=python"
+where py >nul 2>nul
+if not errorlevel 1 (
+    py -3.11 -c "import sys" >nul 2>nul
+    if not errorlevel 1 set "PYTHON_CMD=py -3.11"
+)
+
 echo.
 echo [1/5] Creating virtual environment...
-python -m venv venv
+%PYTHON_CMD% -m venv venv
 if errorlevel 1 (
     echo ERROR: python not found. Install Python 3.10+ from python.org
     pause
@@ -48,11 +55,9 @@ echo   Setup complete!
 echo ========================================
 echo.
 echo   To run the Streamlit UI:
-echo     venv\Scripts\activate
 echo     start_streamlit.bat
 echo.
 echo   To run the backend API:
-echo     venv\Scripts\activate
 echo     start_api.bat
 echo.
 echo   To run tests:

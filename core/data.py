@@ -9,13 +9,25 @@ The app consumes one standard OHLCV structure from here in either:
 from __future__ import annotations
 
 import hashlib
+import sys
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-import yfinance as yf
 from loguru import logger
+
+try:
+    import yfinance as yf
+except ModuleNotFoundError as exc:
+    if exc.name == "yfinance":
+        raise ModuleNotFoundError(
+            "Missing dependency 'yfinance' for the active Python interpreter.\n"
+            f"Current interpreter: {sys.executable}\n"
+            "Install with: python -m pip install -r requirements-core.txt\n"
+            "On Windows, prefer launching with start_streamlit.bat so Streamlit uses the project environment."
+        ) from exc
+    raise
 
 from utils.config import cfg
 
@@ -43,7 +55,9 @@ def _today() -> str:
 
 def _business_or_intraday_freq(interval: str) -> str:
     if interval.endswith("m"):
-        return interval
+        # Pandas 3.x no longer treats "m" as minutes, so normalize yfinance-style
+        # intraday intervals like "1m" or "15m" to explicit minute offsets.
+        return f"{interval[:-1]}min"
     if interval.endswith("h"):
         return interval
     return "B"

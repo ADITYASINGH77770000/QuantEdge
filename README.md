@@ -6,18 +6,17 @@ QuantEdge now runs with the Streamlit UI and backend code in place. The separate
 
 ### Windows
 ```bat
-cd QuantEdge_fixed
+cd QuantEdge-main
 setup.bat
-venv\Scripts\activate
 start_streamlit.bat
 ```
 
 ### Linux / macOS
 ```bash
-cd QuantEdge_fixed
+cd QuantEdge-main
 bash setup.sh
 source venv/bin/activate
-streamlit run app/main.py
+python -m streamlit run app/main.py
 ```
 
 ### Manual Setup
@@ -27,8 +26,10 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env              # Windows: copy .env.example .env
 mkdir -p data/cache data/exports  # Windows: mkdir data\cache data\exports
-streamlit run app/main.py
+python -m streamlit run app/main.py
 ```
+
+If you have multiple Python versions installed, avoid plain `streamlit run app/main.py` on Windows. Use `start_streamlit.bat` or `python -m streamlit run app/main.py` from the activated project environment so Streamlit uses the same interpreter where the dependencies were installed.
 
 ## Backend API
 
@@ -58,7 +59,7 @@ python -m pytest tests/ -v
 ## Project Structure
 
 ```text
-QuantEdge_fixed/
+QuantEdge-main/
 |-- api/
 |   `-- server.py
 |-- app/

@@ -18,6 +18,30 @@ from app.data_engine import (
 )
 from utils.charts import metric_card_row
 from utils.config import cfg
+try:
+    from utils.theme import qe_neon_divider, qe_faq_section
+except ImportError:
+    from utils.theme import qe_neon_divider
+
+    def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
+        qe_neon_divider()
+        st.markdown(f"### {title}")
+        for question, answer in faqs:
+            st.markdown(
+                f"""
+                <div style="
+                    background: rgba(14,22,42,0.82);
+                    border: 1px solid rgba(11,224,255,0.18);
+                    border-radius: 12px;
+                    padding: 14px 16px;
+                    margin: 10px 0;
+                ">
+                  <div style="font-weight:700;color:#e8f4fd;margin-bottom:6px;">Q. {question}</div>
+                  <div style="color:var(--text-dim);line-height:1.55;">A. {answer}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 var_historical = metrics.var_historical
 cvar_historical = metrics.cvar_historical
@@ -85,7 +109,7 @@ kupiec_test = getattr(metrics, "kupiec_test", _fallback_kupiec_test)
 
 st.set_page_config(page_title="Risk | QuantEdge", layout="wide")
 st.title("⚠️ Risk Analytics")
-st.caption("VaR · CVaR · Fat-Tail · GARCH · Portfolio Risk · Stress Testing · Kupiec Backtest")
+qe_neon_divider()
 
 render_data_engine_controls("risk")
 render_cols = st.columns([2, 1, 1, 1])
@@ -102,15 +126,44 @@ rf_rate = render_cols[2].number_input(
 
 start = pd.to_datetime(get_global_start_date())
 
-with st.spinner("Loading data..."):
-    df = load_ticker_data(ticker, start=str(start))
-    ret = returns(df)
+if "risk_result" not in st.session_state:
+    st.session_state.risk_result = None
 
-var_h  = var_historical(ret, conf)
-cvar_h = cvar_historical(ret, conf)
-var_td = var_t_dist(ret, conf)
-var_g  = var_garch(ret, conf)
-vol_a  = annualised_vol(ret)
+run_clicked = st.button("Run Risk Analysis", type="primary")
+if run_clicked:
+    with st.spinner("Loading data and calculating risk metrics..."):
+        df = load_ticker_data(ticker, start=str(start))
+        ret = returns(df)
+
+        st.session_state.risk_result = {
+            "df": df,
+            "ret": ret,
+            "var_h": var_historical(ret, conf),
+            "cvar_h": cvar_historical(ret, conf),
+            "var_td": var_t_dist(ret, conf),
+            "var_g": var_garch(ret, conf),
+            "vol_a": annualised_vol(ret),
+        }
+
+qe_faq_section("FAQs", [
+    ("Which risk number should I trust most?", "Use VaR, CVaR, and GARCH together. VaR is the baseline, CVaR shows tail severity, and GARCH reacts fastest to stress."),
+    ("Why compare portfolio risk to single-stock risk?", "A portfolio can be much safer than any one asset because correlations matter. That comparison shows the benefit of diversification."),
+    ("What does the Kupiec test tell me?", "It checks whether your VaR model is underestimating or overestimating losses by counting actual violations against the expected rate."),
+    ("What should I do if risk is too high?", "Reduce size, lower concentration, or switch to a more defensive allocation until drawdown and volatility stabilize."),
+])
+
+risk_result = st.session_state.risk_result
+if risk_result is None:
+    st.info("Configure the inputs above, then press Run Risk Analysis.")
+    st.stop()
+
+df = risk_result["df"]
+ret = risk_result["ret"]
+var_h  = risk_result["var_h"]
+cvar_h = risk_result["cvar_h"]
+var_td = risk_result["var_td"]
+var_g  = risk_result["var_g"]
+vol_a  = risk_result["vol_a"]
 
 st.markdown(metric_card_row({
     f"VaR {conf:.0%} (Hist)":    f"{var_h:.2%}",

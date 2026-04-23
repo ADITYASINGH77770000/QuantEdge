@@ -20,13 +20,34 @@ from core.regime_detector import (
     REGIME_COLORS, REGIME_LINE_COLORS,
 )
 from utils.config import cfg
+try:
+    from utils.theme import qe_neon_divider, qe_faq_section
+except ImportError:
+    from utils.theme import qe_neon_divider
+
+    def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
+        qe_neon_divider()
+        st.markdown(f"### {title}")
+        for question, answer in faqs:
+            st.markdown(
+                f"""
+                <div style="
+                    background: rgba(14,22,42,0.82);
+                    border: 1px solid rgba(11,224,255,0.18);
+                    border-radius: 12px;
+                    padding: 14px 16px;
+                    margin: 10px 0;
+                ">
+                  <div style="font-weight:700;color:#e8f4fd;margin-bottom:6px;">Q. {question}</div>
+                  <div style="color:var(--text-dim);line-height:1.55;">A. {answer}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 st.set_page_config(page_title="Regime | QuantEdge", layout="wide")
 st.title("🔀 Market Regime Detection")
-st.caption(
-    "5-Feature HMM · Forward Probabilities · Early Warning (AC1) · "
-    "Strategy Router · Rolling Refit · Regime Statistics"
-)
+qe_neon_divider()
 
 # ── Controls ──────────────────────────────────────────────────────────────────
 render_data_engine_controls("regime")
@@ -605,3 +626,10 @@ else:
 | **5. Strategy router** | Factor weights flip per regime | Actually uses the regime for something |
 | **6. Rolling refit** | Refit every 21d on 252d window | Handles non-stationarity and structural breaks |
     """)
+
+qe_faq_section("FAQs", [
+    ("Why use forward probabilities instead of plain labels?", "Forward probabilities are what you would know in real time, so they are safer for live decisions than a lookahead label."),
+    ("What does the early warning signal add?", "It can flag rising instability before the regime actually flips, giving you time to reduce risk."),
+    ("How should I use the strategy router?", "Let it guide whether to lean into momentum, mean reversion, or defense based on the current regime state."),
+    ("When is rolling HMM worth using?", "Turn it on when you want a more adaptive view of the market and are willing to wait a bit longer for the calculation."),
+])
