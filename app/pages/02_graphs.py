@@ -18,6 +18,15 @@ from app.data_engine import (
     render_single_ticker_input,
 )
 from core.graph_features import DEFAULT_GRAPH_BENCHMARK, GRAPH_FEATURES, build_graph_feature_payload
+try:
+    from utils.theme import qe_faq_section
+except ImportError:
+    def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
+        st.markdown("---")
+        st.markdown(f"### {title}")
+        for question, answer in faqs:
+            with st.expander(question):
+                st.write(answer)
 
 
 st.set_page_config(page_title="Graphs | QuantEdge", layout="wide")
@@ -418,3 +427,10 @@ if st.session_state["graphs_generated"]:
             _render_breakout_context(feature)
         elif feature_key == "candle_structure":
             _render_candle_structure(feature)
+
+qe_faq_section("FAQs", [
+    ("What is the graphs page for?", "It shows several research-style views that are built from the same market data engine, so you can compare structure without changing screens."),
+    ("How should I choose a view?", "Pick the view that matches your question: relative strength, volume, seasonality, gaps, breakouts, or candle structure."),
+    ("Do I need to generate graphs every time?", "Yes, because the page only computes the selected view after you click Generate Graph View. That keeps the app responsive."),
+    ("What is the benchmark doing?", "The benchmark gives you a reference line so the ticker can be judged against something more stable than its own history."),
+])

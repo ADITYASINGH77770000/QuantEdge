@@ -21,6 +21,15 @@ from app.data_engine import (
 )
 from utils.charts import metric_card_row
 from utils.config import cfg
+try:
+    from utils.theme import qe_faq_section
+except ImportError:
+    def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
+        st.markdown("---")
+        st.markdown(f"### {title}")
+        for question, answer in faqs:
+            with st.expander(question):
+                st.write(answer)
 
 # ── Page setup ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Auditing | QuantEdge", layout="wide")
@@ -1114,3 +1123,10 @@ if run_btn:
     else:
         for rec in recs:
             st.markdown(rec)
+
+qe_faq_section("FAQs", [
+    ("What does the audit page check?", "It checks for corporate action issues, stale prices, fat tails, volatility breaks, bid-ask bounce, multicollinearity, and data integrity problems."),
+    ("Why does audit matter before backtesting?", "Bad data can create fake alpha. Auditing helps prevent false signals and unreliable performance numbers before you spend time on strategy work."),
+    ("What should I do if the audit fails?", "Fix the data issue first, then rerun the audit. If corporate actions or stale prices are present, do not trust the backtest until they are resolved."),
+    ("Can I use this page for live readiness?", "Yes, it is a useful pre-flight check. If the data passes, you are in a much better position to trust downstream pages."),
+])

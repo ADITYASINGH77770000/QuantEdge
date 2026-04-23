@@ -57,13 +57,34 @@ from app.data_engine import (
 )
 from utils.charts import metric_card_row
 from utils.config import cfg
+try:
+    from utils.theme import qe_neon_divider, qe_faq_section
+except ImportError:
+    from utils.theme import qe_neon_divider
+
+    def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
+        qe_neon_divider()
+        st.markdown(f"### {title}")
+        for question, answer in faqs:
+            st.markdown(
+                f"""
+                <div style="
+                    background: rgba(14,22,42,0.82);
+                    border: 1px solid rgba(11,224,255,0.18);
+                    border-radius: 12px;
+                    padding: 14px 16px;
+                    margin: 10px 0;
+                ">
+                  <div style="font-weight:700;color:#e8f4fd;margin-bottom:6px;">Q. {question}</div>
+                  <div style="color:var(--text-dim);line-height:1.55;">A. {answer}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 st.set_page_config(page_title="Factors | QuantEdge", layout="wide")
 st.title("🧪 Factor Research Lab")
-st.caption(
-    "8-fix upgrade — Honest Proxies · Time-Series IC · Cost-Adjusted Quintiles · "
-    "Regime Conditioning · IC-Weighted Composite · Attribution · Crowding · Correct Decay"
-)
+qe_neon_divider()
 
 # ── Controls ──────────────────────────────────────────────────────────────────
 render_data_engine_controls("factors")
@@ -78,6 +99,12 @@ start = pd.to_datetime(get_global_start_date())
 
 if len(tickers) < 2:
     st.warning("Select at least 2 tickers to compute cross-sectional factors.")
+    qe_faq_section("FAQs", [
+        ("What is the most important first output here?", "Start with the factor score matrix and IC summary. They tell you which signals are actually predictive in your universe."),
+        ("Why does the composite factor change over time?", "Because the page reweights factors by recent IC, so stronger predictors get more influence when markets shift."),
+        ("What is the best use of the backtest section?", "Use it to see whether a factor still works after transaction costs and whether the result survives a more realistic test."),
+        ("How do I know if a factor is crowded?", "Check the crowding section. A crowded factor can look strong until everyone exits at the same time."),
+    ])
     st.stop()
 
 with st.spinner("Loading price data..."):
@@ -94,6 +121,12 @@ run_btn = st.button("▶  Run Full Factor Analysis", type="primary")
 
 if not run_btn:
     st.info("Configure settings above and click **Run Full Factor Analysis**.")
+    qe_faq_section("FAQs", [
+        ("What is the most important first output here?", "Start with the factor score matrix and IC summary. They tell you which signals are actually predictive in your universe."),
+        ("Why does the composite factor change over time?", "Because the page reweights factors by recent IC, so stronger predictors get more influence when markets shift."),
+        ("What is the best use of the backtest section?", "Use it to see whether a factor still works after transaction costs and whether the result survives a more realistic test."),
+        ("How do I know if a factor is crowded?", "Check the crowding section. A crowded factor can look strong until everyone exits at the same time."),
+    ])
     st.stop()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -535,3 +568,10 @@ recs.append(f"✅ Best factor by IC: **{best_factor}**. "
 
 for rec in recs:
     st.markdown(rec)
+
+qe_faq_section("FAQs", [
+    ("What is the most important first output here?", "Start with the factor score matrix and IC summary. They tell you which signals are actually predictive in your universe."),
+    ("Why does the composite factor change over time?", "Because the page reweights factors by recent IC, so stronger predictors get more influence when markets shift."),
+    ("What is the best use of the backtest section?", "Use it to see whether a factor still works after transaction costs and whether the result survives a more realistic test."),
+    ("How do I know if a factor is crowded?", "Check the crowding section. A crowded factor can look strong until everyone exits at the same time."),
+])

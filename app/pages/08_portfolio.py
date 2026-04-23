@@ -23,6 +23,30 @@ from app.data_engine import (
     get_global_start_date,
 )
 from utils.config import cfg
+try:
+    from utils.theme import qe_neon_divider, qe_faq_section
+except ImportError:
+    from utils.theme import qe_neon_divider
+
+    def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
+        qe_neon_divider()
+        st.markdown(f"### {title}")
+        for question, answer in faqs:
+            st.markdown(
+                f"""
+                <div style="
+                    background: rgba(14,22,42,0.82);
+                    border: 1px solid rgba(11,224,255,0.18);
+                    border-radius: 12px;
+                    padding: 14px 16px;
+                    margin: 10px 0;
+                ">
+                  <div style="font-weight:700;color:#e8f4fd;margin-bottom:6px;">Q. {question}</div>
+                  <div style="color:var(--text-dim);line-height:1.55;">A. {answer}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 TRADING_DAYS = 252
 
@@ -265,7 +289,7 @@ def signal_badge(label, value, color):
 
 st.set_page_config(page_title="Portfolio | QuantEdge", layout="wide")
 st.title("Portfolio Optimizer — Quant Grade")
-st.caption("Ledoit-Wolf Covariance · Analytic Frontier · Regime-Conditional Strategy · Net-of-Cost Sharpe")
+qe_neon_divider()
 
 render_data_engine_controls("portfolio")
 
@@ -283,21 +307,84 @@ rebal_days = {"Daily (1d)": 1, "Weekly (5d)": 5,
               "Monthly (21d)": 21, "Quarterly (63d)": 63}[rebal_freq]
 start = pd.to_datetime(get_global_start_date())
 
-if len(tickers) < 2:
-    st.warning("Select at least 2 tickers.")
+if "portfolio_result" not in st.session_state:
+    st.session_state.portfolio_result = None
+
+run_clicked = st.button("Run Portfolio Analysis", type="primary")
+if run_clicked:
+    if len(tickers) < 2:
+        st.warning("Select at least 2 tickers.")
+        st.session_state.portfolio_result = None
+    else:
+        with st.spinner("Loading data and optimizing portfolio..."):
+            prices = load_multi_ticker_data(tickers, start=str(start))
+            ret_df = align_returns(prices)
+
+            if ret_df.empty or len(ret_df) < 30:
+                st.error("Need at least 30 days of aligned returns. Try an earlier start date.")
+                st.session_state.portfolio_result = None
+            else:
+                ret_df = ret_df.dropna(axis=1, thresh=int(len(ret_df) * 0.8)).dropna()
+                tickers = list(ret_df.columns)
+                equal_weights = np.ones(len(tickers)) / len(tickers)
+                health = covariance_health(ret_df)
+                regime_info = detect_market_regime(ret_df)
+                eq_ret = ret_df.mean(axis=1).tail(252)
+                if len(eq_ret) >= 120:
+                    _, reg_s, _ = fit_hmm(eq_ret, n_states=3)
+                    reg_map = {r: (1 if "Bull" in str(r) else -1 if "Bear" in str(r) else 0)
+                               for r in reg_s.unique()}
+                    regime_timeline = reg_s.map(reg_map)
+                else:
+                    roll = eq_ret.rolling(21).sum().fillna(0)
+                    regime_timeline = np.sign(roll).rename("Regime")
+
+                cov = ledoit_wolf_cov(ret_df)
+                mu = ret_df.mean().values * TRADING_DAYS
+                ms_weights = analytic_max_sharpe(mu, cov, cfg.RISK_FREE_RATE, max_weight)
+                mv_weights = analytic_min_vol(mu, cov, max_weight)
+                rp_weights = risk_parity_weights_lw(cov)
+                frontier = build_analytic_frontier(mu, cov, cfg.RISK_FREE_RATE)
+
+                st.session_state.portfolio_result = {
+                    "tickers": tickers,
+                    "ret_df": ret_df,
+                    "equal_weights": equal_weights,
+                    "health": health,
+                    "regime_info": regime_info,
+                    "regime_timeline": regime_timeline,
+                    "cov": cov,
+                    "mu": mu,
+                    "ms_weights": ms_weights,
+                    "mv_weights": mv_weights,
+                    "rp_weights": rp_weights,
+                    "frontier": frontier,
+                }
+
+qe_faq_section("FAQs", [
+    ("How do I choose weights here?", "Use the optimizer output first. Max Sharpe, Min Variance, and Risk Parity give three different starting points depending on your goal."),
+    ("Why does regime matter in portfolio construction?", "Bull, bear, and sideways markets reward different portfolio shapes, so the regime-adaptive tab helps the weights change with conditions."),
+    ("What does concentration tell me?", "It shows whether one or two holdings dominate the portfolio. High concentration means more hidden risk if those names move against you."),
+    ("When should I rebalance?", "Rebalance when the optimizer or regime view changes enough to justify the transaction costs, not on every small daily move."),
+])
+
+portfolio_result = st.session_state.portfolio_result
+if portfolio_result is None:
+    st.info("Configure the inputs above, then press Run Portfolio Analysis.")
     st.stop()
 
-with st.spinner("Loading data..."):
-    prices = load_multi_ticker_data(tickers, start=str(start))
-    ret_df = align_returns(prices)
-
-if ret_df.empty or len(ret_df) < 30:
-    st.error("Need at least 30 days of aligned returns. Try an earlier start date.")
-    st.stop()
-
-ret_df = ret_df.dropna(axis=1, thresh=int(len(ret_df) * 0.8)).dropna()
-tickers = list(ret_df.columns)
-equal_weights = np.ones(len(tickers)) / len(tickers)
+tickers = portfolio_result["tickers"]
+ret_df = portfolio_result["ret_df"]
+equal_weights = portfolio_result["equal_weights"]
+health = portfolio_result["health"]
+regime_info = portfolio_result["regime_info"]
+regime_timeline = portfolio_result["regime_timeline"]
+cov = portfolio_result["cov"]
+mu = portfolio_result["mu"]
+ms_weights = portfolio_result["ms_weights"]
+mv_weights = portfolio_result["mv_weights"]
+rp_weights = portfolio_result["rp_weights"]
+frontier = portfolio_result["frontier"]
 
 # ── Signals panel ─────────────────────────────────────────────────────────────
 st.markdown("---")
@@ -305,14 +392,11 @@ st.subheader("Live Signals")
 s1, s2, s3 = st.columns(3)
 
 with s1:
-    health = covariance_health(ret_df)
     st.markdown("**Covariance Health**")
     signal_badge("Status", f"{health['status']} (ratio {health['ratio']:.1f}x)", health["color"])
     st.caption(health["msg"])
 
 with s2:
-    with st.spinner("Detecting regime..."):
-        regime_info = detect_market_regime(ret_df)
     st.markdown("**Market Regime**")
     signal_badge("Regime", regime_info["current"], regime_info["color"])
     st.caption(f"Recommended: **{regime_info['strategy']}** — {regime_info['reason']}")
@@ -320,16 +404,7 @@ with s2:
 with s3:
     st.markdown("**Regime Timeline (1yr)**")
     try:
-        eq_ret = ret_df.mean(axis=1).tail(252)
-        if len(eq_ret) >= 120:
-            _, reg_s, _ = fit_hmm(eq_ret, n_states=3)
-            reg_map = {r: (1 if "Bull" in str(r) else -1 if "Bear" in str(r) else 0)
-                       for r in reg_s.unique()}
-            reg_num = reg_s.map(reg_map)
-        else:
-            # Fallback: rolling return sign as proxy
-            roll = eq_ret.rolling(21).sum().fillna(0)
-            reg_num = np.sign(roll).rename("Regime")
+        reg_num = regime_timeline
         fig_r = go.Figure(go.Scatter(x=reg_num.index, y=reg_num.values,
                                      fill="tozeroy", line=dict(width=0),
                                      fillcolor="rgba(29,158,117,0.3)"))
@@ -344,14 +419,6 @@ with s3:
 st.markdown("---")
 
 # ── Run optimisation ──────────────────────────────────────────────────────────
-with st.spinner("Running Ledoit-Wolf + Analytic Optimization..."):
-    cov = ledoit_wolf_cov(ret_df)
-    mu = ret_df.mean().values * TRADING_DAYS
-    ms_weights = analytic_max_sharpe(mu, cov, cfg.RISK_FREE_RATE, max_weight)
-    mv_weights = analytic_min_vol(mu, cov, max_weight)
-    rp_weights = risk_parity_weights_lw(cov)
-    frontier = build_analytic_frontier(mu, cov, cfg.RISK_FREE_RATE)
-
 tab1, tab2, tab3, tab4 = st.tabs([
     "Efficient Frontier", "Regime-Adaptive", "Risk Parity", "Correlation"
 ])

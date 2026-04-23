@@ -187,6 +187,15 @@ class RegimeBacktestResult:
     base_result:     BacktestResult
 
 
+def _close_series(frame: pd.Series | pd.DataFrame) -> pd.Series:
+    """Return a close-price series from either a Series or an OHLCV DataFrame."""
+    if isinstance(frame, pd.Series):
+        return frame.copy()
+    if "Close" not in frame.columns:
+        raise KeyError("Expected a 'Close' column in the input DataFrame.")
+    return frame["Close"].copy()
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 3 — CORE BACKTEST ENGINE
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -380,7 +389,7 @@ def run_regime_backtest(
     based on detected market regime. Typically improves Sharpe by 0.3-0.8
     and cuts max drawdown by 20-40% vs any single strategy.
     """
-    price  = df["Close"].copy()
+    price  = _close_series(df)
     regime = detect_regime(price, window=regime_window)
 
     signals = {
@@ -424,7 +433,7 @@ def regime_strategy_matrix(
     regime_window: int = 63,
 ) -> pd.DataFrame:
     """Which strategy performs best in each regime? Returns a comparison table."""
-    price  = df["Close"].copy()
+    price  = _close_series(df)
     regime = detect_regime(price, window=regime_window)
     records = []
     strats = {
@@ -461,7 +470,7 @@ def regime_strategy_matrix(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def run_walk_forward(
-    df:        pd.DataFrame,
+    df:        pd.Series | pd.DataFrame,
     signal_fn: Callable[[pd.DataFrame], pd.Series],
     bt_cfg:    BacktestConfig    = BacktestConfig(),
     wf_cfg:    WalkForwardConfig = WalkForwardConfig(),
@@ -469,18 +478,19 @@ def run_walk_forward(
     """
     Rolling train/test walk-forward validation.
 
-    signal_fn accepts a **DataFrame** (OHLCV slice) and returns a signal pd.Series.
+    signal_fn accepts an OHLCV slice and returns a signal pd.Series.
     Example:
         lambda df_slice: momentum_strategy(df_slice, lookback=20)
 
-    Passing a DataFrame (not bare pd.Series) keeps the API consistent with every
-    strategy function in the library and avoids silent column-lookup errors.
+    The input may be either a full OHLCV DataFrame or just a Close-price Series.
+    That keeps the page code flexible and avoids KeyError: 'Close' when callers
+    already extracted the series for convenience.
 
     Efficiency Ratio = OOS Sharpe / IS Sharpe
       >= 0.5  strategy is consistent, may be deployable
       <  0.5  OVERFIT WARNING — do not deploy live
     """
-    price      = df["Close"]
+    price      = _close_series(df)
     DAYS       = 252
     train_days = int(wf_cfg.train_months / 12 * DAYS)
     test_days  = int(wf_cfg.test_months  / 12 * DAYS)

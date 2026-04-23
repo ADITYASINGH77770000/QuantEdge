@@ -15,6 +15,7 @@
 # ── Deep Learning (LSTM / Transformer prediction) ────────────────────────────
 tensorflow>=2.14.0
 xgboost>=2.1.0          # gradient boosted trees — also used in tabular prediction
+torch>=2.2.0            # required for the Transformer prediction backend
 
 # ── Optional ML extras (prediction models)
 # Install the following only if you need heavy deep-learning models (LSTM/Transformer)

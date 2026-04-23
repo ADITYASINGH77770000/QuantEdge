@@ -179,6 +179,26 @@ def _header(title: str, subtitle: str = ""):
     st.markdown(f'<div class="qe-page-title">{title}</div>', unsafe_allow_html=True)
     if subtitle:
         st.markdown(f'<div class="qe-page-sub">{subtitle}</div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div style="
+            height: 2px;
+            width: 100%;
+            margin: 14px 0 18px 0;
+            border-radius: 999px;
+            background: linear-gradient(90deg,
+                rgba(0,245,160,0.0) 0%,
+                rgba(0,245,160,0.95) 18%,
+                rgba(11,224,255,0.95) 50%,
+                rgba(165,94,253,0.95) 82%,
+                rgba(165,94,253,0.0) 100%);
+            box-shadow:
+                0 0 10px rgba(11,224,255,0.55),
+                0 0 24px rgba(165,94,253,0.25);
+        "></div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _sb_sec(label: str):

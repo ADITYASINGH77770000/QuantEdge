@@ -1,6 +1,10 @@
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import warnings; warnings.filterwarnings("ignore")
+import json
+from urllib import error as urlerror
+from urllib import request as urlrequest
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -27,12 +31,180 @@ from core.alpha_engine import (
     combine_signals,
 )
 from utils.config import cfg
+try:
+    from utils.theme import qe_neon_divider, qe_faq_section
+except ImportError:
+    from utils.theme import qe_neon_divider
+
+    def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
+        qe_neon_divider()
+        st.markdown(f"### {title}")
+        for question, answer in faqs:
+            st.markdown(
+                f"""
+                <div style="
+                    background: rgba(14,22,42,0.82);
+                    border: 1px solid rgba(11,224,255,0.18);
+                    border-radius: 12px;
+                    padding: 14px 16px;
+                    margin: 10px 0;
+                ">
+                  <div style="font-weight:700;color:#e8f4fd;margin-bottom:6px;">Q. {question}</div>
+                  <div style="color:var(--text-dim);line-height:1.55;">A. {answer}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+def _latest_non_na(series: pd.Series, default: float = 0.0) -> float:
+    cleaned = series.dropna()
+    if cleaned.empty:
+        return default
+    return float(cleaned.iloc[-1])
+
+
+def _signal_word(value: float) -> str:
+    if value > 0:
+        return "BUY"
+    if value < 0:
+        return "SELL"
+    return "HOLD"
+
+
+def _signal_summary_rows(all_signals: dict[str, pd.Series]) -> list[dict]:
+    rows: list[dict] = []
+    for name, sig in all_signals.items():
+        latest = _latest_non_na(sig, 0.0)
+        rows.append({
+            "name": name,
+            "value": latest,
+            "label": _signal_word(latest),
+        })
+    return rows
+
+
+def _build_signal_context(
+    ticker: str,
+    fwd_days: int,
+    latest_combined: int,
+    latest_ofi: float,
+    latest_skew: float,
+    latest_crowd: float,
+    crowd_w: float,
+    ic_weights: dict[str, float],
+    all_signals: dict[str, pd.Series],
+) -> dict:
+    signal_rows = _signal_summary_rows(all_signals)
+    active_weights = [
+        {"signal": name, "weight": round(weight, 4)}
+        for name, weight in sorted(ic_weights.items(), key=lambda item: item[1], reverse=True)
+        if weight > 0
+    ]
+    top_signals = [
+        {
+            "signal": row["name"],
+            "latest": row["value"],
+            "label": row["label"],
+            "ic_weight": round(ic_weights.get(row["name"], 0.0), 4),
+        }
+        for row in sorted(signal_rows, key=lambda item: abs(item["value"]), reverse=True)
+    ]
+    return {
+        "ticker": ticker,
+        "forward_window_days": fwd_days,
+        "combined_signal": latest_combined,
+        "combined_label": _signal_word(latest_combined),
+        "ofi_z": round(latest_ofi, 3),
+        "skew_z": round(latest_skew, 3),
+        "crowding_score": round(latest_crowd, 3),
+        "crowding_weight": round(crowd_w, 3),
+        "active_ic_weights": active_weights,
+        "signal_snapshot": top_signals,
+    }
+
+
+def _fallback_signal_explanation(context: dict) -> str:
+    direction = context["combined_label"]
+    driver_lines = []
+    if context["ofi_z"] > 0.5:
+        driver_lines.append("volume pressure is leaning bullish")
+    elif context["ofi_z"] < -0.5:
+        driver_lines.append("volume pressure is leaning bearish")
+    if context["skew_z"] < -0.5:
+        driver_lines.append("realized skew is showing more downside stress")
+    elif context["skew_z"] > 0.5:
+        driver_lines.append("realized skew is relatively calm")
+    if context["crowding_score"] > 1.3:
+        driver_lines.append("crowding is elevated, so the setup is less clean")
+    elif context["crowding_score"] < 1.0:
+        driver_lines.append("crowding is still moderate to low")
+
+    top_signal_names = [row["signal"] for row in context["signal_snapshot"][:3]]
+    active = ", ".join(top_signal_names) if top_signal_names else "the current signal stack"
+    reasons = "; ".join(driver_lines) if driver_lines else "the inputs are mostly balanced"
+    return (
+        f"{context['ticker']} currently reads as {direction} on a {context['forward_window_days']}-day horizon. "
+        f"The most relevant drivers are {active}, and the main context is that {reasons}. "
+        f"Use this as a plain-English translation of the numeric output, not as a new trading signal."
+    )
+
+
+def _call_gemini_explainer(context: dict) -> str:
+    gemini_api_key = getattr(cfg, "GEMINI_API_KEY", "")
+    gemini_model = getattr(cfg, "GEMINI_MODEL", "gemini-1.5-flash")
+
+    if not gemini_api_key:
+        return _fallback_signal_explanation(context)
+
+    system_prompt = (
+        "You are a quant analyst inside a trading dashboard. "
+        "Explain the displayed signal output in simple English for non-technical users. "
+        "Only use the numbers and labels in the provided context. "
+        "Do not invent new signals, do not give financial advice, and do not overstate certainty. "
+        "Return exactly 4 short sections with these headings: Summary, Main Drivers, Risk Checks, Plain-English Takeaway."
+    )
+    user_prompt = json.dumps(context, indent=2)
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "topP": 0.9,
+            "maxOutputTokens": 350,
+        },
+    }
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{gemini_model}:generateContent?key={gemini_api_key}"
+    )
+    req = urlrequest.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        candidates = data.get("candidates", [])
+        if not candidates:
+            return _fallback_signal_explanation(context)
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = "".join(part.get("text", "") for part in parts).strip()
+        return text or _fallback_signal_explanation(context)
+    except (urlerror.URLError, TimeoutError, ValueError, KeyError) as exc:
+        return (
+            _fallback_signal_explanation(context)
+            + f" (Gemini explanation unavailable: {exc.__class__.__name__})"
+        )
 
 st.set_page_config(page_title="Signals | QuantEdge", layout="wide")
 st.title("📡 Unified Alpha Signal Dashboard")
 st.caption(
     "Volume Pressure · Crowding · Realized Skew · Signal Health · Macro Regime · IC-Weighted Combined Signal"
 )
+qe_neon_divider()
 
 # ── Controls ──────────────────────────────────────────────────────────────────
 render_data_engine_controls("signals")
@@ -45,43 +217,101 @@ ofi_thresh  = c3.slider("OFI threshold", 0.3, 2.0, 0.8, 0.1)
 skew_thresh = c4.slider("Skew threshold", 0.3, 2.0, 0.7, 0.1)
 start = pd.to_datetime(get_global_start_date())
 
-with st.spinner("Loading data & computing all signals..."):
-    df     = load_ticker_data(ticker, start=str(start))
-    df_ind = add_all_indicators(df)
-    ret    = returns(df)
-    fwd    = ret.shift(-fwd_days)
+if "signal_result" not in st.session_state:
+    st.session_state.signal_result = None
 
-# ── Compute all signals ───────────────────────────────────────────────────────
-ofi_z    = compute_ofi(df)
-ofi_sig  = ofi_signal(df, threshold=ofi_thresh)
-skew_z   = compute_iv_skew_proxy(df)
-skew_sig = iv_skew_signal(df, threshold=skew_thresh)
-crowd    = compute_crowding_score(ret)
-crowd_w  = crowding_weight(ret)
+run_clicked = st.button("Run Signal Analysis", type="primary")
+if run_clicked:
+    with st.spinner("Loading data & computing all signals..."):
+        df     = load_ticker_data(ticker, start=str(start))
+        df_ind = add_all_indicators(df)
+        ret    = returns(df)
+        fwd    = ret.shift(-fwd_days)
 
-# Classic signals
-rsi_sig  = signal_rsi(df_ind)
-macd_sig = signal_macd_crossover(df_ind)
-bb_sig   = signal_bb_mean_reversion(df_ind)
-dma_sig  = signal_dual_ma(df_ind, 20, 50)
+        ofi_z    = compute_ofi(df)
+        ofi_sig  = ofi_signal(df, threshold=ofi_thresh)
+        skew_z   = compute_iv_skew_proxy(df)
+        skew_sig = iv_skew_signal(df, threshold=skew_thresh)
+        crowd    = compute_crowding_score(ret)
+        crowd_w  = crowding_weight(ret)
 
-all_signals = {
-    "RSI":          rsi_sig,
-    "MACD":         macd_sig,
-    "BB Reversion": bb_sig,
-    "Dual MA":      dma_sig,
-    "OFI":          ofi_sig,
-    "Realized Skew":      skew_sig,
-}
+        rsi_sig  = signal_rsi(df_ind)
+        macd_sig = signal_macd_crossover(df_ind)
+        bb_sig   = signal_bb_mean_reversion(df_ind)
+        dma_sig  = signal_dual_ma(df_ind, 20, 50)
 
-# IC-weighted combined
-combined_sig, ic_weights = combine_signals(all_signals, ret, fwd_days=fwd_days)
+        all_signals = {
+            "RSI":          rsi_sig,
+            "MACD":         macd_sig,
+            "BB Reversion": bb_sig,
+            "Dual MA":      dma_sig,
+            "OFI":          ofi_sig,
+            "Realized Skew": skew_sig,
+        }
 
-# ── MASTER SIGNAL HEADER ──────────────────────────────────────────────────────
-latest_combined = int(combined_sig.dropna().iloc[-1]) if not combined_sig.dropna().empty else 0
-latest_ofi      = float(ofi_z.dropna().iloc[-1])      if not ofi_z.dropna().empty      else 0.0
-latest_skew     = float(skew_z.dropna().iloc[-1])     if not skew_z.dropna().empty     else 0.0
-latest_crowd    = float(crowd.dropna().iloc[-1])      if not crowd.dropna().empty      else 1.0
+        combined_sig, ic_weights = combine_signals(all_signals, ret, fwd_days=fwd_days)
+
+        latest_combined = int(combined_sig.dropna().iloc[-1]) if not combined_sig.dropna().empty else 0
+        latest_ofi      = float(ofi_z.dropna().iloc[-1]) if not ofi_z.dropna().empty else 0.0
+        latest_skew     = float(skew_z.dropna().iloc[-1]) if not skew_z.dropna().empty else 0.0
+        latest_crowd    = float(crowd.dropna().iloc[-1]) if not crowd.dropna().empty else 1.0
+
+        st.session_state.signal_result = {
+            "df": df,
+            "df_ind": df_ind,
+            "ret": ret,
+            "fwd": fwd,
+            "ofi_z": ofi_z,
+            "ofi_sig": ofi_sig,
+            "skew_z": skew_z,
+            "skew_sig": skew_sig,
+            "crowd": crowd,
+            "crowd_w": crowd_w,
+            "rsi_sig": rsi_sig,
+            "macd_sig": macd_sig,
+            "bb_sig": bb_sig,
+            "dma_sig": dma_sig,
+            "all_signals": all_signals,
+            "combined_sig": combined_sig,
+            "ic_weights": ic_weights,
+            "latest_combined": latest_combined,
+            "latest_ofi": latest_ofi,
+            "latest_skew": latest_skew,
+            "latest_crowd": latest_crowd,
+        }
+
+signal_result = st.session_state.signal_result
+if signal_result is None:
+    st.info("Configure the inputs above, then press Run Signal Analysis.")
+    qe_faq_section("FAQs", [
+        ("How do I use the signal dashboard?", "Pick a ticker, set the thresholds, and click Run Signal Analysis. That computes the full signal stack and stores it for the current session."),
+        ("What does the combined signal represent?", "It is an IC-weighted blend of the available signals, so stronger historical predictors get more influence than weak ones."),
+        ("Why should I check crowding and health?", "A signal can look good on paper but still be crowded or decaying. Those tabs help you avoid using a fragile setup."),
+        ("What should I do after the signal changes?", "Treat the new signal as a prompt to review price context, regime context, and macro confirmation before acting."),
+    ])
+    st.stop()
+
+df = signal_result["df"]
+df_ind = signal_result["df_ind"]
+ret = signal_result["ret"]
+fwd = signal_result["fwd"]
+ofi_z = signal_result["ofi_z"]
+ofi_sig = signal_result["ofi_sig"]
+skew_z = signal_result["skew_z"]
+skew_sig = signal_result["skew_sig"]
+crowd = signal_result["crowd"]
+crowd_w = signal_result["crowd_w"]
+rsi_sig = signal_result["rsi_sig"]
+macd_sig = signal_result["macd_sig"]
+bb_sig = signal_result["bb_sig"]
+dma_sig = signal_result["dma_sig"]
+all_signals = signal_result["all_signals"]
+combined_sig = signal_result["combined_sig"]
+ic_weights = signal_result["ic_weights"]
+latest_combined = signal_result["latest_combined"]
+latest_ofi = signal_result["latest_ofi"]
+latest_skew = signal_result["latest_skew"]
+latest_crowd = signal_result["latest_crowd"]
 
 signal_color = {"🟢 BUY": "green", "🔴 SELL": "red", "⚪ HOLD": "gray"}
 master_label = "🟢 BUY" if latest_combined == 1 else ("🔴 SELL" if latest_combined == -1 else "⚪ HOLD")
@@ -569,3 +799,84 @@ macro_score = mean(components).clip(-2, 2)
 in 2015-2018 but partially risk-on in 2022. HYG/equity correlation broke down in 2023.
 A regime-adaptive version that detects correlation structure changes is the frontier.
         """)
+
+st.markdown("---")
+st.subheader("AI Interpretation")
+st.caption(
+    "Optional plain-English layer. It explains the already-computed signal stack "
+    "and does not change the underlying signal."
+)
+
+signal_context = _build_signal_context(
+    ticker=ticker,
+    fwd_days=fwd_days,
+    latest_combined=latest_combined,
+    latest_ofi=latest_ofi,
+    latest_skew=latest_skew,
+    latest_crowd=latest_crowd,
+    crowd_w=crowd_w,
+    ic_weights=ic_weights,
+    all_signals=all_signals,
+)
+signal_context_key = json.dumps(signal_context, sort_keys=True)
+if st.session_state.get("signal_ai_context_key") != signal_context_key:
+    st.session_state.signal_ai_context_key = signal_context_key
+    st.session_state.signal_ai_summary = ""
+
+ai_left, ai_right = st.columns([1, 2])
+with ai_left:
+    st.metric("Current call", master_label)
+    st.metric("Forward window", f"{fwd_days} days")
+    st.metric("Crowding", f"{latest_crowd:.2f}x")
+    st.metric("Active IC weights", sum(1 for v in ic_weights.values() if v > 0))
+    explain_clicked = st.button(
+        "Explain in simple terms",
+        type="primary",
+        key="signal_ai_explain",
+        use_container_width=True,
+    )
+    clear_clicked = st.button(
+        "Clear explanation",
+        key="signal_ai_clear",
+        use_container_width=True,
+    )
+
+with ai_right:
+    st.markdown(
+        """
+        <div style="
+            background: rgba(14,22,42,0.82);
+            border: 1px solid rgba(11,224,255,0.18);
+            border-radius: 12px;
+            padding: 16px 18px;
+            line-height: 1.65;
+        ">
+          <div style="font-weight:700;color:#e8f4fd;margin-bottom:8px;">What this button does</div>
+          <div style="color:var(--text-dim);">
+            It translates the live quant output into plain English, using only the numbers
+            already shown on this page. If Gemini is configured, it will write the summary.
+            If not, the app falls back to a deterministic quant-safe explanation.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown("")
+    st.dataframe(
+        pd.DataFrame(signal_context["signal_snapshot"]).head(6),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+if clear_clicked:
+    st.session_state.signal_ai_summary = ""
+
+if explain_clicked:
+    with st.spinner("Writing a grounded explanation from the current signal stack..."):
+        st.session_state.signal_ai_summary = _call_gemini_explainer(signal_context)
+
+if st.session_state.get("signal_ai_summary"):
+    st.markdown("#### Result")
+    st.markdown(st.session_state.signal_ai_summary)
+else:
+    st.info("Click **Explain in simple terms** to generate a plain-English summary of the current signal stack.")

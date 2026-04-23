@@ -24,13 +24,18 @@ def send_email(subject: str, body: str) -> bool:
     -------
     bool — True on success, False on failure
     """
+    receiver = cfg.GMAIL_RECEIVER or cfg.GMAIL_SENDER
+
     if not cfg.GMAIL_PASSWORD or not cfg.GMAIL_SENDER:
         logger.warning("Email credentials not configured — skipping notification")
+        return False
+    if not receiver:
+        logger.warning("Email receiver not configured — skipping notification")
         return False
 
     msg = MIMEMultipart()
     msg["From"]    = cfg.GMAIL_SENDER
-    msg["To"]      = cfg.GMAIL_RECEIVER
+    msg["To"]      = receiver
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
 
@@ -38,7 +43,7 @@ def send_email(subject: str, body: str) -> bool:
         with smtplib.SMTP(cfg.SMTP_SERVER, cfg.SMTP_PORT) as server:
             server.starttls()
             server.login(cfg.GMAIL_SENDER, cfg.GMAIL_PASSWORD)
-            server.sendmail(cfg.GMAIL_SENDER, cfg.GMAIL_RECEIVER, msg.as_string())
+            server.sendmail(cfg.GMAIL_SENDER, receiver, msg.as_string())
         logger.info(f"Alert email sent: {subject}")
         return True
     except Exception as exc:

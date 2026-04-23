@@ -889,6 +889,53 @@ def qe_section_header(title: str, subtitle: str = "") -> None:
     st.markdown(html, unsafe_allow_html=True)
 
 
+def qe_neon_divider() -> None:
+    """Render the neon divider that separates a page heading from its content."""
+    st.markdown(
+        """
+        <div style="
+            height: 2px;
+            width: 100%;
+            margin: 14px 0 18px 0;
+            border-radius: 999px;
+            background: linear-gradient(90deg,
+                rgba(0,245,160,0.0) 0%,
+                rgba(0,245,160,0.95) 18%,
+                rgba(11,224,255,0.95) 50%,
+                rgba(165,94,253,0.95) 82%,
+                rgba(165,94,253,0.0) 100%);
+            box-shadow:
+                0 0 10px rgba(11,224,255,0.55),
+                0 0 24px rgba(165,94,253,0.25);
+        "></div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
+    """Render a neon divider followed by a visible FAQ section."""
+    qe_neon_divider()
+    st.markdown(f"### {title}")
+    for question, answer in faqs:
+        st.markdown(
+            f"""
+            <div style="
+                background: rgba(14,22,42,0.82);
+                border: 1px solid rgba(11,224,255,0.18);
+                border-radius: 12px;
+                padding: 14px 16px;
+                margin: 10px 0;
+                box-shadow: 0 0 18px rgba(11,224,255,0.08);
+            ">
+              <div style="font-weight:700;color:#e8f4fd;margin-bottom:6px;">Q. {question}</div>
+              <div style="color:var(--text-dim);line-height:1.55;">A. {answer}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def qe_regime_box(regime: str, recommendation: str = "") -> None:
     """Render a regime environment indicator box."""
     regime_lower = regime.lower()
