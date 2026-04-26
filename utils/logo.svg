@@ -1,0 +1,9 @@
+<svg width="220" height="40" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="qeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00f5a0;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0be0ff;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <text x="0" y="28" font-family="'Inter', sans-serif" font-weight="700" font-size="22" fill="url(#qeGrad)">📡 QuantEdge</text>
+</svg>

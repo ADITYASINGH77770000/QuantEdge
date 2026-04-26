@@ -1,0 +1,104 @@
+[
+  {
+    "type": "Risk",
+    "message": "Drawdown -25.00% exceeds dynamic threshold (20.00% = 2.0\u00d7 P90=10.00%)",
+    "level": "CRITICAL",
+    "timestamp": "2026-04-22T00:06:07"
+  },
+  {
+    "type": "VaR",
+    "message": "VaR -20.00% exceeds dynamic threshold (7.50% = 1.5\u00d7 P90=5.00%)",
+    "level": "CRITICAL",
+    "timestamp": "2026-04-22T00:06:07"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to 0.50 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-22T00:06:07"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -2.06 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-22T18:59:25"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -2.06 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-22T19:01:51"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -2.06 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-22T19:02:14"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -0.62 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-22T19:04:57"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -0.62 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-22T19:05:19"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -0.62 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-22T19:05:42"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -0.62 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-22T21:02:45"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -0.62 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-22T21:03:59"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -0.62 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-22T21:07:09"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -0.62 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-22T21:09:53"
+  },
+  {
+    "type": "EarlyWarning",
+    "message": "Critical slowing down detected \u2014 regime change possible within 10-20 days",
+    "level": "HIGH",
+    "timestamp": "2026-04-26T21:56:48"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -0.95 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-26T21:56:48"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -0.79 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-26T22:04:17"
+  },
+  {
+    "type": "Performance",
+    "message": "Sharpe ratio deteriorated to -0.79 (min=1.0)",
+    "level": "MEDIUM",
+    "timestamp": "2026-04-26T22:05:10"
+  }
+]

@@ -1,15 +1,20 @@
-
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import warnings
+import json
+from urllib import error as urlerror
+from urllib import request as urlrequest
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.figure_factory as ff
 from plotly.subplots import make_subplots
-import streamlit as st
+try:
+    import streamlit as st
+except Exception:
+    from utils._stubs import st as st
 from scipy import stats as sp_stats
 
 from core.data import get_ohlcv
@@ -33,6 +38,8 @@ except ImportError:
 
 # ── Page setup ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Auditing | QuantEdge", layout="wide")
+from app.shared import apply_theme
+apply_theme()
 st.title("🔍 Professional Data Auditing Engine")
 st.caption(
     "8 quant-grade checks — runs all at once. "
@@ -640,6 +647,257 @@ def check_lookahead_freshness(df: pd.DataFrame) -> dict:
 # MAIN PAGE RENDER
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AI LAYER 1 — DETERMINISTIC DANGER FLAGS
+# Synthesises all 8 check results. Mirrors _compute_portfolio_danger_flags().
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _compute_audit_danger_flags(
+    ticker: str,
+    r_corp: dict, r_stale: dict, r_fat: dict, r_vol: dict,
+    r_bid: dict, r_vif: dict, r_ts: dict, r_fresh: dict,
+    data_source: str = "unknown",
+) -> list[dict]:
+    flags = []
+
+    if data_source in ("demo", ""):
+        flags.append({"severity": "INFO", "code": "DEMO_DATA",
+            "message": f"Audit for {ticker} is running on SYNTHETIC demo data. All check results are illustrative only."})
+
+    # CHECK 1: Corporate Actions
+    if r_corp.get("severity") == "FAIL":
+        flags.append({"severity": "DANGER", "code": "CORP_ACTION_FAIL",
+            "message": (f"Corporate action misalignment: {r_corp.get('n_events', 0)} event(s) including likely splits/mergers "
+                        "(raw gap >12%, adj gap <1%). These create massive false signals in any backtest using raw Close.")})
+    elif r_corp.get("severity") == "WARN":
+        flags.append({"severity": "WARNING", "code": "CORP_ACTION_WARN",
+            "message": f"{r_corp.get('n_events', 0)} dividend/partial adjustment event(s). Verify strategy uses Adj Close."})
+
+    # CHECK 2: Stale Prices
+    max_streak = r_stale.get("max_streak", 0)
+    if r_stale.get("severity") == "FAIL" or max_streak >= 10:
+        flags.append({"severity": "DANGER", "code": "STALE_PRICES_FAIL",
+            "message": (f"Severe stale pricing: longest streak = {max_streak} consecutive identical closing prices. "
+                        f"Zero-return days = {r_stale.get('zero_ret_pct', 0):.1%}. "
+                        "Creates artificially smooth equity curves and inflated Sharpe ratios.")})
+    elif r_stale.get("severity") == "WARN":
+        flags.append({"severity": "WARNING", "code": "STALE_PRICES_WARN",
+            "message": (f"Stale pricing: max streak = {max_streak} days, "
+                        f"zero-return days = {r_stale.get('zero_ret_pct', 0):.1%}. Monitor for illiquidity.")})
+
+    # CHECK 3: Fat Tails
+    var_under = r_fat.get("var_underestimate", 0)
+    if r_fat.get("severity") == "FAIL":
+        flags.append({"severity": "DANGER", "code": "FAT_TAILS_FAIL",
+            "message": (f"Non-normal returns with severe fat tails: excess kurtosis = {r_fat.get('excess_kurtosis', 0):.2f} "
+                        f"(normal = 0). JB p-value = {r_fat.get('jb_pval', 0):.6f} — normality rejected. "
+                        f"Gaussian VaR underestimates true tail risk by ~{var_under:.1%}. Use historical VaR only.")})
+    elif r_fat.get("severity") == "WARN":
+        flags.append({"severity": "WARNING", "code": "FAT_TAILS_WARN",
+            "message": (f"Non-normal returns (JB p={r_fat.get('jb_pval', 0):.4f}). "
+                        f"Skewness = {r_fat.get('skew', 0):.3f}. Sharpe and VaR may be unreliable.")})
+    if var_under > 0.30 and r_fat.get("severity") != "FAIL":
+        flags.append({"severity": "WARNING", "code": "HIGH_VAR_UNDERESTIMATE",
+            "message": f"Gaussian VaR underestimates true tail risk by {var_under:.1%} — above the 30% warning threshold."})
+
+    # CHECK 4: Volatility Regime
+    vol_ratio = r_vol.get("vol_ratio")
+    if r_vol.get("break_detected"):
+        flags.append({"severity": "DANGER", "code": "REGIME_BREAK_DETECTED",
+            "message": (f"Structural volatility break at {r_vol['break_date'].date() if r_vol.get('break_date') else 'unknown'}. "
+                        f"Vol changed {f'{vol_ratio:.1f}x' if vol_ratio else 'significantly'} across break. "
+                        "Sharpe/VaR computed over full period blends two different market regimes. Split backtest at break date.")})
+
+    # CHECK 5: Bid-Ask Bounce
+    spread_bps = r_bid.get("spread_bps", 0)
+    if r_bid.get("severity") == "FAIL" or spread_bps > 50:
+        flags.append({"severity": "DANGER", "code": "BID_ASK_BOUNCE_FAIL",
+            "message": (f"Severe bid-ask bounce: lag-1 AC = {r_bid.get('lag1_ac', 0):.4f}, "
+                        f"Roll spread = {spread_bps:.1f} bps. Mean-reversion signals likely trading microstructure noise.")})
+    elif r_bid.get("severity") == "WARN":
+        flags.append({"severity": "WARNING", "code": "BID_ASK_BOUNCE_WARN",
+            "message": f"Moderate bid-ask bounce: spread = {spread_bps:.1f} bps, lag-1 AC = {r_bid.get('lag1_ac', 0):.4f}. Add 3-5 day minimum holding period."})
+
+    # CHECK 6: Multicollinearity
+    max_vif = r_vif.get("max_vif", 0)
+    if r_vif.get("severity") == "FAIL" or max_vif > 20:
+        flags.append({"severity": "DANGER", "code": "HIGH_VIF_FAIL",
+            "message": (f"Extreme signal multicollinearity: max VIF = {max_vif:.1f} ({r_vif.get('n_high', 0)} signal(s) ≥ 5). "
+                        "Technical signals are redundant — reduce to 1-2 uncorrelated indicators.")})
+    elif r_vif.get("severity") == "WARN":
+        flags.append({"severity": "WARNING", "code": "HIGH_VIF_WARN",
+            "message": f"Signal multicollinearity: max VIF = {max_vif:.1f}. {r_vif.get('n_high', 0)} signal(s) exceed VIF 5 threshold."})
+
+    # CHECK 7: Timestamp Integrity
+    if r_ts.get("severity") == "FAIL":
+        flags.append({"severity": "DANGER", "code": "TIMESTAMP_FAIL",
+            "message": f"OHLCV data integrity failure: {r_ts.get('n_issues', 0)} issue(s) over {r_ts.get('total_rows', 0)} rows. Fix before running any strategy."})
+    elif r_ts.get("severity") == "WARN":
+        flags.append({"severity": "WARNING", "code": "TIMESTAMP_WARN",
+            "message": f"Timestamp warnings: {r_ts.get('n_issues', 0)} issue(s), {r_ts.get('n_missing', 0)} missing business dates."})
+
+    # CHECK 8: Data Freshness
+    if r_fresh.get("severity") == "FAIL":
+        flags.append({"severity": "DANGER", "code": "DATA_FRESHNESS_FAIL",
+            "message": (f"Data is {r_fresh.get('biz_days_old', 0)} business days old — stale for live deployment."
+                        + (f" {r_fresh.get('n_inf_returns', 0)} infinite return(s) detected." if r_fresh.get("n_inf_returns", 0) > 0 else ""))})
+    elif r_fresh.get("severity") == "WARN":
+        flags.append({"severity": "WARNING", "code": "DATA_FRESHNESS_WARN",
+            "message": f"{r_fresh.get('n_restatements', 0)} retroactive Adj Close restatement(s) — silent data mutation may make two backtests non-comparable."})
+
+    return flags
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AI LAYER 2 — AUDIT CONTEXT BUILDER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _build_audit_context(
+    ticker, r_corp, r_stale, r_fat, r_vol, r_bid, r_vif, r_ts, r_fresh,
+    n_pass, n_warn, n_fail, danger_flags, data_source="unknown",
+) -> dict:
+    def _s(v):
+        if v is None or (isinstance(v, float) and (v != v)): return None
+        return round(float(v), 4) if isinstance(v, float) else v
+
+    return {
+        "ticker": ticker, "data_source": data_source,
+        "scorecard": {"checks_run": 8, "pass": n_pass, "warn": n_warn, "fail": n_fail,
+                      "overall": "FAIL" if n_fail > 0 else ("WARN" if n_warn > 0 else "PASS")},
+        "checks": {
+            "corporate_actions": {"severity": r_corp.get("severity"), "n_events": r_corp.get("n_events", 0)},
+            "stale_prices":      {"severity": r_stale.get("severity"), "max_streak": r_stale.get("max_streak"),
+                                   "zero_ret_pct": _s(r_stale.get("zero_ret_pct")), "lag1_ac": _s(r_stale.get("lag1_ac"))},
+            "fat_tails":         {"severity": r_fat.get("severity"), "is_normal": r_fat.get("is_normal"),
+                                   "excess_kurtosis": _s(r_fat.get("excess_kurtosis")), "skewness": _s(r_fat.get("skew")),
+                                   "jb_pval": _s(r_fat.get("jb_pval")), "var_underestimate": _s(r_fat.get("var_underestimate"))},
+            "volatility_regime": {"severity": r_vol.get("severity"), "break_detected": r_vol.get("break_detected"),
+                                   "break_date": str(r_vol["break_date"].date()) if r_vol.get("break_date") else None,
+                                   "vol_before": _s(r_vol.get("vol_before")), "vol_after": _s(r_vol.get("vol_after")),
+                                   "vol_ratio": _s(r_vol.get("vol_ratio"))},
+            "bid_ask_bounce":    {"severity": r_bid.get("severity"), "lag1_ac": _s(r_bid.get("lag1_ac")),
+                                   "spread_bps": _s(r_bid.get("spread_bps")), "hl_spread_bps": _s(r_bid.get("hl_spread_bps"))},
+            "multicollinearity": {"severity": r_vif.get("severity"), "max_vif": _s(r_vif.get("max_vif")),
+                                   "n_high_vif": r_vif.get("n_high", 0),
+                                   "vif_table": r_vif["vif_df"][["Signal","VIF","Verdict"]].to_dict("records")
+                                               if not r_vif.get("vif_df", pd.DataFrame()).empty else []},
+            "timestamp_integrity": {"severity": r_ts.get("severity"), "n_issues": r_ts.get("n_issues", 0),
+                                     "total_rows": r_ts.get("total_rows"), "date_range": r_ts.get("date_range"),
+                                     "n_missing": r_ts.get("n_missing", 0)},
+            "data_freshness":    {"severity": r_fresh.get("severity"), "biz_days_old": r_fresh.get("biz_days_old"),
+                                   "freshness_ok": r_fresh.get("freshness_ok"), "last_date": r_fresh.get("last_date"),
+                                   "n_restatements": r_fresh.get("n_restatements", 0),
+                                   "n_inf_returns": r_fresh.get("n_inf_returns", 0)},
+        },
+        "danger_flags": danger_flags,
+        "danger_flag_count":  len([f for f in danger_flags if f["severity"] == "DANGER"]),
+        "warning_flag_count": len([f for f in danger_flags if f["severity"] == "WARNING"]),
+        "reference_thresholds": {
+            "stale_streak_danger": 5, "zero_ret_pct_danger": 0.15,
+            "excess_kurtosis_fat_tail": 3.0, "var_underestimate_warning": 0.30,
+            "vol_ratio_extreme": 2.0, "lag1_ac_bounce_fail": 0.15,
+            "spread_bps_fail": 30, "spread_bps_danger": 50,
+            "vif_high": 5, "vif_extreme": 10, "stale_data_biz_days": 2,
+        },
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AI LAYER — DETERMINISTIC FALLBACK
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _fallback_audit_explanation(context: dict) -> str:
+    sc = context["scorecard"]; checks = context["checks"]; flags = context.get("danger_flags", [])
+    flag_text = ""
+    if flags:
+        flag_text = "\n\n**Flags:**\n" + "\n".join(f"- **{f['severity']}** ({f['code']}): {f['message']}" for f in flags)
+    check_lines = "\n".join(f"- **{n.replace('_',' ').title()}**: {d.get('severity')}" for n, d in checks.items())
+    return (f"### What the audit found\n"
+            f"Audit for **{context['ticker']}** — {sc['checks_run']} checks. "
+            f"Overall: **{sc['overall']}** ({sc['pass']} pass / {sc['warn']} warn / {sc['fail']} fail).\n\n"
+            f"### What each check means\n{check_lines}\n{flag_text}\n\n"
+            f"### Plain English conclusion\n"
+            f"{'Fix FAIL issues before running any strategy. ' if sc['fail'] > 0 else ''}"
+            f"{'Review WARNings before live deployment. ' if sc['warn'] > 0 else ''}"
+            f"{'Data passed all checks.' if sc['overall'] == 'PASS' else ''}\n\n"
+            f"⚠️ *Not financial advice. Always verify with your own judgment.*")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AI LAYER — GEMINI EXPLAINER
+# ══════════════════════════════════════════════════════════════════════════════
+
+_GEMINI_AUDIT_SYSTEM_PROMPT = """You are a senior quantitative analyst and data integrity specialist inside a professional data auditing tool.
+
+Explain the 8-check audit to a NON-TECHNICAL user (portfolio manager / investor).
+
+RULES:
+1. Use ONLY numbers from the JSON. Never invent figures.
+2. Address danger/warning flags FIRST if any exist.
+3. Explain what each of the 8 checks tests in ONE plain English sentence.
+4. Use reference_thresholds to judge safe/borderline/dangerous.
+5. Never say "you should trade" or "you should not trade."
+6. If data_source is "demo", say these are synthetic results.
+
+CHECKS (explain exactly):
+- Corporate Actions: unadjusted splits/dividends creating fake price jumps in signals
+- Stale Prices: identical closing prices on consecutive days = stock wasn't trading
+- Fat Tails: more extreme losses than normal distribution predicts — VaR is too optimistic
+- Volatility Regime Shift: market behaviour changed dramatically at some point — historical metrics unreliable
+- Bid-Ask Bounce: price alternates bid/ask, creating false mean-reversion signals (Roll 1984)
+- Signal Multicollinearity: technical indicators say the same thing — redundant, inflates false confidence
+- Timestamp Integrity: corrupted OHLCV — impossible prices, duplicates, future dates
+- Data Freshness: how old the data is, and whether historical prices were silently revised
+
+THRESHOLDS: stale streak ≥5 days = dangerous; excess kurtosis >3 = fat tails; VaR underestimate >30% = severe; vol ratio >2x = regime doubled; lag-1 AC < -0.15 or spread >30 bps = bounce; VIF >10 = extreme; data >2 biz days old = stale
+
+OUTPUT FORMAT — exactly 4 sections:
+### What the audit found
+### What each check result means
+### Red flags
+### Plain English conclusion
+
+End with this exact line:
+⚠️ This explanation is generated by AI from audit outputs only. It is not financial advice. Always verify with your own judgment and a qualified professional."""
+
+
+def _call_gemini_audit_explainer(context: dict) -> str:
+    gemini_key   = getattr(cfg, "GEMINI_API_KEY", "") or ""
+    gemini_model = getattr(cfg, "GEMINI_MODEL", "gemini-1.5-flash") or "gemini-1.5-flash"
+    if not gemini_key:
+        return _fallback_audit_explanation(context)
+
+    safe_ctx  = json.loads(json.dumps(context, default=str))
+    user_text = "Here is the data audit output. Please explain it for a non-technical user:\n\n" + json.dumps(safe_ctx, indent=2)
+    url       = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
+    payload   = {
+        "system_instruction": {"parts": [{"text": _GEMINI_AUDIT_SYSTEM_PROMPT}]},
+        "contents": [{"role": "user", "parts": [{"text": user_text}]}],
+        "generationConfig": {"maxOutputTokens": 1000, "temperature": 0.2},
+    }
+    req = urlrequest.Request(url, data=json.dumps(payload).encode("utf-8"),
+                              headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urlrequest.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        candidates = data.get("candidates", [])
+        if not candidates: raise ValueError("No candidates")
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text  = "".join(p.get("text", "") for p in parts).strip()
+        return text or _fallback_audit_explanation(context)
+    except (urlerror.URLError, TimeoutError, ValueError, KeyError) as exc:
+        return _fallback_audit_explanation(context) + f"\n\n*Gemini unavailable ({exc.__class__.__name__}). Add GEMINI_API_KEY to .env.*"
+
+
+# ── Session state keys ────────────────────────────────────────────────────────
+_AUDIT_KEY     = "audit_result"
+_AUDIT_HAS_RUN = "audit_has_run"
+st.session_state.setdefault(_AUDIT_HAS_RUN, False)
+st.session_state.setdefault("audit_ai_summary", "")
+st.session_state.setdefault("audit_ai_context_key", "")
+
 if run_btn:
     with st.spinner(f"Loading data for {ticker}..."):
         df = load_ticker_data(ticker, start=str(start))
@@ -657,6 +915,29 @@ if run_btn:
         r_vif   = check_multicollinearity(df)
         r_ts    = check_timestamp_integrity(df, ticker)
         r_fresh = check_lookahead_freshness(df)
+
+    # Store all results in session_state so they survive Decode button reruns
+    st.session_state[_AUDIT_KEY] = {
+        "df": df, "ticker": ticker,
+        "r_corp": r_corp, "r_stale": r_stale, "r_fat": r_fat, "r_vol": r_vol,
+        "r_bid": r_bid, "r_vif": r_vif, "r_ts": r_ts, "r_fresh": r_fresh,
+    }
+    st.session_state[_AUDIT_HAS_RUN]         = True
+    st.session_state["audit_ai_summary"]     = ""
+    st.session_state["audit_ai_context_key"] = ""
+
+if st.session_state[_AUDIT_HAS_RUN]:
+    _stored = st.session_state[_AUDIT_KEY]
+    df      = _stored["df"]
+    ticker  = _stored["ticker"]
+    r_corp  = _stored["r_corp"]
+    r_stale = _stored["r_stale"]
+    r_fat   = _stored["r_fat"]
+    r_vol   = _stored["r_vol"]
+    r_bid   = _stored["r_bid"]
+    r_vif   = _stored["r_vif"]
+    r_ts    = _stored["r_ts"]
+    r_fresh = _stored["r_fresh"]
 
     # ── Summary scorecard ─────────────────────────────────────────────────────
     st.markdown("---")
@@ -1124,6 +1405,115 @@ if run_btn:
         for rec in recs:
             st.markdown(rec)
 
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # AI DECODER SECTION — same 3-layer architecture as portfolio/dashboard
+    # ══════════════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("""
+<div style="margin: 8px 0 4px;">
+  <span style="font-size:20px;font-weight:600;">🤖 AI Audit Decoder</span>
+  <span style="font-size:12px;opacity:0.55;margin-left:12px;">
+    Plain-English explanation for non-technical users · Powered by Gemini
+  </span>
+</div>
+""", unsafe_allow_html=True)
+    st.caption("Translates all 8 audit check results into plain English. Reads actual numbers — not generic descriptions. Does not modify data or give financial advice.")
+
+    # LAYER 1: Deterministic danger flags
+    data_source  = str(df.attrs.get("data_source", "unknown"))
+    danger_flags = _compute_audit_danger_flags(
+        ticker=ticker, r_corp=r_corp, r_stale=r_stale, r_fat=r_fat, r_vol=r_vol,
+        r_bid=r_bid, r_vif=r_vif, r_ts=r_ts, r_fresh=r_fresh, data_source=data_source,
+    )
+    if danger_flags:
+        n_d = sum(1 for f in danger_flags if f["severity"] == "DANGER")
+        n_w = sum(1 for f in danger_flags if f["severity"] == "WARNING")
+        n_i = sum(1 for f in danger_flags if f["severity"] == "INFO")
+        bh  = ""
+        if n_d: bh += f'<span style="background:#dc3232;color:#fff;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:600;margin-right:6px;">⛔ {n_d} DANGER</span>'
+        if n_w: bh += f'<span style="background:#e67e00;color:#fff;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:600;margin-right:6px;">⚠️ {n_w} WARNING</span>'
+        if n_i: bh += f'<span style="background:#1a6fa0;color:#fff;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:600;">ℹ️ {n_i} INFO</span>'
+        st.markdown(f'<div style="margin:10px 0 6px;">{bh}</div>', unsafe_allow_html=True)
+        cm = {"DANGER":"#dc3232","WARNING":"#e67e00","INFO":"#1a6fa0"}
+        bm = {"DANGER":"rgba(220,50,50,0.08)","WARNING":"rgba(230,126,0,0.08)","INFO":"rgba(26,111,160,0.08)"}
+        for flag in danger_flags:
+            st.markdown(f"""<div style="background:{bm[flag['severity']]};border-left:3px solid {cm[flag['severity']]};border-radius:0 6px 6px 0;padding:10px 14px;margin:6px 0;font-size:13px;line-height:1.55;">
+              <span style="font-weight:700;color:{cm[flag['severity']]};">{flag['severity']} · {flag['code']}</span><br>{flag['message']}</div>""", unsafe_allow_html=True)
+    else:
+        st.success("✅ Pre-flight checks passed — no critical flags from audit results.")
+    st.markdown("")
+
+    # LAYER 2: Context + button
+    audit_context = _build_audit_context(
+        ticker=ticker, r_corp=r_corp, r_stale=r_stale, r_fat=r_fat, r_vol=r_vol,
+        r_bid=r_bid, r_vif=r_vif, r_ts=r_ts, r_fresh=r_fresh,
+        n_pass=n_pass, n_warn=n_warn, n_fail=n_fail,
+        danger_flags=danger_flags, data_source=data_source,
+    )
+    ctx_key = json.dumps({k: v for k, v in audit_context.items() if k != "danger_flags"}, sort_keys=True, default=str)
+    if st.session_state.get("audit_ai_context_key") != ctx_key:
+        st.session_state.audit_ai_context_key = ctx_key
+        st.session_state.audit_ai_summary = ""
+
+    cb, cc = st.columns([1, 2])
+    with cb:
+        st.markdown("**What Gemini sees:**")
+        preview = [
+            {"Field": "Ticker",          "Value": ticker},
+            {"Field": "Overall result",  "Value": audit_context["scorecard"]["overall"]},
+            {"Field": "Pass/Warn/Fail",  "Value": f"{n_pass}/{n_warn}/{n_fail}"},
+            {"Field": "Corp Actions",    "Value": r_corp["severity"]},
+            {"Field": "Stale Prices",    "Value": r_stale["severity"]},
+            {"Field": "Fat Tails",       "Value": r_fat["severity"]},
+            {"Field": "Vol Regime",      "Value": r_vol["severity"]},
+            {"Field": "Bid-Ask",         "Value": r_bid["severity"]},
+            {"Field": "VIF",             "Value": r_vif["severity"]},
+            {"Field": "Timestamps",      "Value": r_ts["severity"]},
+            {"Field": "Freshness",       "Value": r_fresh["severity"]},
+            {"Field": "Excess Kurtosis", "Value": f"{r_fat['excess_kurtosis']:.3f}"},
+            {"Field": "VaR Underest.",   "Value": f"{r_fat['var_underestimate']:.1%}"},
+            {"Field": "Max VIF",         "Value": f"{r_vif['max_vif']:.1f}"},
+            {"Field": "Spread bps",      "Value": f"{r_bid['spread_bps']:.1f}"},
+            {"Field": "Regime break",    "Value": str(r_vol["break_detected"])},
+            {"Field": "Biz days old",    "Value": str(r_fresh["biz_days_old"])},
+            {"Field": "Danger flags",    "Value": str(sum(1 for f in danger_flags if f["severity"]=="DANGER"))},
+            {"Field": "Warning flags",   "Value": str(sum(1 for f in danger_flags if f["severity"]=="WARNING"))},
+        ]
+        st.dataframe(pd.DataFrame(preview), hide_index=True, use_container_width=True)
+        if not bool(getattr(cfg, "GEMINI_API_KEY", "")):
+            st.info("💡 Add `GEMINI_API_KEY` to .env for Gemini AI explanations.")
+        decode_clicked = st.button("🤖 Decode for Me", type="primary", key="audit_ai_explain", use_container_width=True)
+        clear_clicked  = st.button("Clear explanation", key="audit_ai_clear", use_container_width=True)
+    with cc:
+        st.markdown("**How this works:**")
+        st.markdown('''<div style="background:rgba(14,22,42,0.82);border:1px solid rgba(11,224,255,0.18);border-radius:10px;padding:16px 18px;font-size:13px;line-height:1.65;">
+  <div style="font-weight:700;color:#e8f4fd;margin-bottom:10px;">What happens when you click Decode:</div>
+  <ol style="margin:0;padding-left:18px;color:#a8c4d8;">
+    <li style="margin-bottom:6px;">Pre-flight checks run first — danger flags are always deterministic from all 8 checks, shown regardless of Decode.</li>
+    <li style="margin-bottom:6px;">Actual results from all 8 checks (severity, key metrics) are sent to Gemini with the scorecard and all flags.</li>
+    <li style="margin-bottom:6px;">Gemini explains what each check tested, what was found, and why it matters — using actual values, not generic descriptions.</li>
+    <li style="margin-bottom:6px;">Output: 4 sections — what the audit found · what each result means · red flags · plain-English conclusion.</li>
+    <li>A mandatory disclaimer is appended — not financial advice.</li>
+  </ol>
+</div>''', unsafe_allow_html=True)
+
+    if clear_clicked: st.session_state.audit_ai_summary = ""
+    if decode_clicked:
+        with st.spinner("Gemini is reading all 8 audit results..."):
+            st.session_state.audit_ai_summary = _call_gemini_audit_explainer(audit_context)
+
+    # LAYER 3: AI output
+    if st.session_state.get("audit_ai_summary"):
+        st.markdown("")
+        st.markdown('<div style="background:rgba(14,22,42,0.82);border:1px solid rgba(11,224,255,0.28);border-radius:12px;padding:20px 24px;margin-top:8px;">', unsafe_allow_html=True)
+        st.markdown(st.session_state.audit_ai_summary)
+        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("")
+        st.markdown('<div style="border:1px dashed rgba(11,224,255,0.18);border-radius:10px;padding:20px;text-align:center;color:rgba(200,220,240,0.4);font-size:14px;">Click <strong>🤖 Decode for Me</strong> to get a plain-English explanation of all 8 audit check results.</div>', unsafe_allow_html=True)
+
+# ── FAQs (outside run block — always visible) ─────────────────────────────────
 qe_faq_section("FAQs", [
     ("What does the audit page check?", "It checks for corporate action issues, stale prices, fat tails, volatility breaks, bid-ask bounce, multicollinearity, and data integrity problems."),
     ("Why does audit matter before backtesting?", "Bad data can create fake alpha. Auditing helps prevent false signals and unreliable performance numbers before you spend time on strategy work."),
