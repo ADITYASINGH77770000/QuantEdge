@@ -157,12 +157,23 @@ def _enable_timed_refresh(page_key: str, refresh_seconds: int) -> None:
 
 
 def render_data_engine_controls(page_key: str, *, auto_refresh: bool = True) -> dict[str, object]:
-    """Render one shared set of data controls in the sidebar."""
+    """Render branded nav + shared data controls in the sidebar."""
     defaults = get_data_engine_settings()
     source_badge = "DEMO DATA" if cfg.DEMO_MODE else "LIVE REAL DATA"
 
+    # ── Hide Streamlit's plain auto-generated nav (handled natively in .streamlit/config.toml)
+
+    # ── Left natively for Streamlit engine ─────────────────────────────────────
+    st.sidebar.markdown(
+        """<div style="height:2px;width:100%;margin:14px 0 18px 0;border-radius:999px;
+            background:linear-gradient(90deg, rgba(0,245,160,0.0) 0%, rgba(0,245,160,0.95) 18%, 
+            rgba(11,224,255,0.95) 50%, rgba(165,94,253,0.95) 82%, rgba(165,94,253,0.0) 100%);
+            box-shadow:0 0 10px rgba(11,224,255,0.55), 0 0 24px rgba(165,94,253,0.25);"></div>""",
+        unsafe_allow_html=True
+    )
+
+    # ── Data Engine controls ──────────────────────────────────────────────────
     st.sidebar.subheader("Data Engine")
-    st.sidebar.caption(f"Source Badge: {source_badge}")
     st.session_state.setdefault("qe_static_start_date", defaults["static_start_date"])
     st.sidebar.radio(
         "Update Mode",
@@ -206,14 +217,8 @@ def render_data_engine_controls(page_key: str, *, auto_refresh: bool = True) -> 
     )
 
     settings = get_data_engine_settings()
-    if settings["live_mode"]:
-        st.sidebar.caption(
-            f"Refreshing every {settings['refresh_seconds']}s with {settings['live_interval']} intraday updates."
-        )
-        if auto_refresh:
-            _enable_timed_refresh(page_key, int(settings["refresh_seconds"]))
-    else:
-        st.sidebar.caption("Using cached historical data starting from the global Static Start Date.")
+    if settings["live_mode"] and auto_refresh:
+        _enable_timed_refresh(page_key, int(settings["refresh_seconds"]))
 
     return settings
 

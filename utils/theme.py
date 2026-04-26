@@ -6,7 +6,39 @@ Neuroscience-driven design: attention magnetism, reward loops, flow state.
 Call apply_quantedge_theme() at the top of every page.
 """
 
-import streamlit as st
+try:
+  import streamlit as st
+except Exception:
+  class _ColumnStub:
+    def metric(self, *args, **kwargs):
+      return None
+
+  class _NoStreamlit:
+    def markdown(self, *args, **kwargs):
+      return None
+
+    def plotly_chart(self, *args, **kwargs):
+      return None
+
+    def download_button(self, *args, **kwargs):
+      return None
+
+    def set_page_config(self, *args, **kwargs):
+      return None
+
+    def columns(self, n=1):
+      return [_ColumnStub() for _ in range(n)]
+
+    def dataframe(self, *args, **kwargs):
+      return None
+
+    def warning(self, *args, **kwargs):
+      return None
+
+    def info(self, *args, **kwargs):
+      return None
+
+  st = _NoStreamlit()
 
 
 # ── Plotly dark theme config shared across all pages ─────────────────────────
@@ -56,6 +88,7 @@ _CSS = """
 :root {
   --bg-void:      #03050d;
   --bg-deep:      #070b16;
+
   --bg-panel:     rgba(10,16,30,0.85);
   --bg-glass:     rgba(14,22,42,0.72);
   --border-glow:  rgba(11,224,255,0.18);
@@ -82,53 +115,27 @@ _CSS = """
 *, *::before, *::after { box-sizing: border-box; }
 
 html, body, [data-testid="stAppViewContainer"] {
+  /* config.toml now matches --bg-void exactly — no flash between the two */
   background: var(--bg-void) !important;
   color: var(--text-primary) !important;
-  font-family: var(--font-main) !important;
+  font-family: var(--font-main);
+  /* Smooth any residual color transition instead of opacity jump */
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-/* ── Animated starfield background ── */
-[data-testid="stAppViewContainer"]::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  background:
-    radial-gradient(ellipse at 20% 20%, rgba(11,224,255,0.04) 0%, transparent 60%),
-    radial-gradient(ellipse at 80% 80%, rgba(165,94,253,0.04) 0%, transparent 60%),
-    radial-gradient(ellipse at 50% 50%, rgba(0,245,160,0.02) 0%, transparent 70%);
-  animation: ambientShift 12s ease-in-out infinite alternate;
-  pointer-events: none;
-}
-
-@keyframes ambientShift {
-  0%   { opacity: 0.6; transform: scale(1); }
-  100% { opacity: 1;   transform: scale(1.04); }
-}
-
-/* ── Grid fabric overlay ── */
-[data-testid="stAppViewContainer"]::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  background-image:
-    linear-gradient(rgba(11,224,255,0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(11,224,255,0.04) 1px, transparent 1px);
-  background-size: 60px 60px;
-  animation: gridDrift 20s linear infinite;
-  pointer-events: none;
-}
-
-@keyframes gridDrift {
-  0%   { transform: translate(0, 0); }
-  100% { transform: translate(60px, 60px); }
-}
 
 /* ── Main content above bg ── */
 [data-testid="stMain"], section.main, .block-container {
   position: relative;
   z-index: 1;
+}
+
+/* ── Hide native nav border to prevent double lines ── */
+[data-testid="stSidebarNavSeparator"] { display: none !important; }
+
+/* ── Prevent global typography from breaking Streamlit material icons ── */
+.stIcon, span.material-symbols-rounded {
+    font-family: 'Material Symbols Rounded' !important;
 }
 
 .block-container {
@@ -160,7 +167,6 @@ html, body, [data-testid="stAppViewContainer"] {
 
 [data-testid="stSidebar"] * { font-family: var(--font-main) !important; }
 
-/* Sidebar nav links */
 [data-testid="stSidebarNav"] a {
   border-radius: var(--radius-sm) !important;
   transition: var(--transition) !important;
@@ -204,7 +210,6 @@ h3 {
   font-weight: 500 !important;
 }
 
-/* ── Captions ── */
 [data-testid="stCaption"], .stCaption {
   color: var(--text-dim) !important;
   font-family: var(--font-mono) !important;
@@ -212,7 +217,6 @@ h3 {
   letter-spacing: 0.5px;
 }
 
-/* ── Streamlit metric widgets ── */
 [data-testid="stMetric"] {
   background: var(--bg-glass) !important;
   border: 1px solid var(--border-dim) !important;
@@ -241,7 +245,6 @@ h3 {
 }
 [data-testid="stMetricDelta"] { font-size: 0.82rem !important; }
 
-/* ── Buttons ── */
 [data-testid="stButton"] > button,
 button[kind="primary"],
 .stButton button {
@@ -258,14 +261,6 @@ button[kind="primary"],
   position: relative !important;
   overflow: hidden !important;
   text-transform: uppercase !important;
-}
-[data-testid="stButton"] > button::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(11,224,255,0.08), rgba(165,94,253,0.08));
-  opacity: 0;
-  transition: opacity 0.3s;
 }
 [data-testid="stButton"] > button:hover {
   background: linear-gradient(135deg, rgba(11,224,255,0.25), rgba(165,94,253,0.25)) !important;
@@ -288,11 +283,8 @@ button[kind="primary"]:hover {
   color: #fff !important;
 }
 
-/* ── Select boxes & inputs ── */
 [data-testid="stSelectbox"] > div,
-[data-testid="stMultiSelect"] > div,
-.stSelectbox > div > div,
-.stMultiSelect > div > div {
+[data-testid="stMultiSelect"] > div {
   background: var(--bg-glass) !important;
   border: 1px solid var(--border-dim) !important;
   border-radius: var(--radius-sm) !important;
@@ -305,19 +297,11 @@ button[kind="primary"]:hover {
   box-shadow: 0 0 12px var(--glow-blue) !important;
 }
 
-/* ── Sliders ── */
-[data-testid="stSlider"] {
-  padding: 4px 0 !important;
-}
 [data-testid="stSlider"] [role="slider"] {
   background: var(--text-accent) !important;
   box-shadow: 0 0 12px var(--glow-blue) !important;
 }
-[data-testid="stSlider"] .st-bm {
-  background: linear-gradient(90deg, var(--accent-buy), var(--text-accent)) !important;
-}
 
-/* ── Number inputs ── */
 [data-testid="stNumberInput"] input,
 [data-testid="stDateInput"] input,
 .stTextInput input {
@@ -335,32 +319,17 @@ button[kind="primary"]:hover {
   outline: none !important;
 }
 
-/* ── Info / Warning / Success / Error boxes ── */
-[data-testid="stAlert"],
-.stAlert, .element-container .stAlert {
+[data-testid="stAlert"], .stAlert {
   border-radius: var(--radius) !important;
   backdrop-filter: blur(12px) !important;
   border-left-width: 3px !important;
   font-size: 0.88rem !important;
 }
-div[data-testid="stInfo"] {
-  background: rgba(11,224,255,0.06) !important;
-  border-color: var(--text-accent) !important;
-}
-div[data-testid="stWarning"] {
-  background: rgba(255,215,0,0.06) !important;
-  border-color: var(--accent-gold) !important;
-}
-div[data-testid="stSuccess"] {
-  background: rgba(0,245,160,0.06) !important;
-  border-color: var(--accent-buy) !important;
-}
-div[data-testid="stError"] {
-  background: rgba(255,71,87,0.08) !important;
-  border-color: var(--accent-sell) !important;
-}
+div[data-testid="stInfo"]    { background: rgba(11,224,255,0.06) !important; border-color: var(--text-accent) !important; }
+div[data-testid="stWarning"] { background: rgba(255,215,0,0.06)  !important; border-color: var(--accent-gold)  !important; }
+div[data-testid="stSuccess"] { background: rgba(0,245,160,0.06)  !important; border-color: var(--accent-buy)   !important; }
+div[data-testid="stError"]   { background: rgba(255,71,87,0.08)  !important; border-color: var(--accent-sell)  !important; }
 
-/* ── Tabs ── */
 [data-testid="stTabs"] button[role="tab"] {
   background: transparent !important;
   border: none !important;
@@ -385,7 +354,6 @@ div[data-testid="stError"] {
   border-radius: var(--radius-sm) var(--radius-sm) 0 0 !important;
 }
 
-/* ── Expander ── */
 [data-testid="stExpander"] {
   background: var(--bg-glass) !important;
   border: 1px solid var(--border-dim) !important;
@@ -393,9 +361,7 @@ div[data-testid="stError"] {
   backdrop-filter: blur(12px) !important;
   transition: var(--transition) !important;
 }
-[data-testid="stExpander"]:hover {
-  border-color: var(--border-glow) !important;
-}
+[data-testid="stExpander"]:hover { border-color: var(--border-glow) !important; }
 [data-testid="stExpanderToggleIcon"] { color: var(--text-accent) !important; }
 [data-testid="stExpander"] summary {
   color: var(--text-dim) !important;
@@ -404,21 +370,13 @@ div[data-testid="stError"] {
   padding: 12px 16px !important;
 }
 
-/* ── Dataframes ── */
 [data-testid="stDataFrame"] {
   border-radius: var(--radius) !important;
   overflow: hidden !important;
   border: 1px solid var(--border-dim) !important;
   box-shadow: 0 4px 20px rgba(0,0,0,0.3) !important;
 }
-.dvn-scroller { background: var(--bg-panel) !important; }
-.glideDataEditor { background: var(--bg-panel) !important; }
 
-/* ── Plotly charts ── */
-.js-plotly-plot, .plotly .svg-container {
-  border-radius: var(--radius) !important;
-  overflow: hidden !important;
-}
 [data-testid="stPlotlyChart"] {
   border-radius: var(--radius) !important;
   border: 1px solid var(--border-dim) !important;
@@ -431,10 +389,6 @@ div[data-testid="stError"] {
   box-shadow: 0 0 30px var(--glow-blue), 0 4px 40px rgba(0,0,0,0.5) !important;
 }
 
-/* ── Spinner ── */
-[data-testid="stSpinner"] { color: var(--text-accent) !important; }
-
-/* ── Divider ── */
 hr {
   border: none !important;
   height: 1px !important;
@@ -442,7 +396,6 @@ hr {
   margin: 1.5rem 0 !important;
 }
 
-/* ── Download button ── */
 [data-testid="stDownloadButton"] button {
   background: rgba(165,94,253,0.1) !important;
   border: 1px solid rgba(165,94,253,0.35) !important;
@@ -458,16 +411,11 @@ hr {
   box-shadow: 0 0 16px rgba(165,94,253,0.4) !important;
 }
 
-/* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: var(--bg-deep); }
-::-webkit-scrollbar-thumb {
-  background: var(--border-glow);
-  border-radius: 3px;
-}
+::-webkit-scrollbar-thumb { background: var(--border-glow); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-accent); }
 
-/* ── Label text ── */
 label, .stSelectbox label, .stSlider label,
 .stNumberInput label, .stDateInput label,
 .stMultiSelect label, .stCheckbox label {
@@ -479,23 +427,6 @@ label, .stSelectbox label, .stSlider label,
   font-weight: 500 !important;
 }
 
-/* ── Sidebar title ── */
-[data-testid="stSidebar"] h1,
-[data-testid="stSidebar"] .sidebar-title {
-  font-size: 1.3rem !important;
-  background: linear-gradient(135deg, var(--accent-buy), var(--text-accent));
-  -webkit-background-clip: text !important;
-  -webkit-text-fill-color: transparent !important;
-  background-clip: text !important;
-}
-
-/* ── Sidebar caption ── */
-[data-testid="stSidebar"] [data-testid="stCaption"] {
-  font-size: 0.72rem !important;
-  color: var(--text-dim) !important;
-}
-
-/* ── Multiselect tags ── */
 span[data-baseweb="tag"] {
   background: rgba(11,224,255,0.12) !important;
   border: 1px solid var(--border-glow) !important;
@@ -505,7 +436,6 @@ span[data-baseweb="tag"] {
   font-family: var(--font-mono) !important;
 }
 
-/* ── Code blocks ── */
 code, pre {
   background: rgba(10,16,30,0.8) !important;
   border: 1px solid var(--border-dim) !important;
@@ -514,56 +444,34 @@ code, pre {
   color: var(--accent-buy) !important;
 }
 
-/* ── Columns spacing ── */
 [data-testid="column"] { padding: 0 6px !important; }
 
-/* ── Top bar progress ── */
-[data-testid="stStatusWidget"] { display: none !important; }
+/* ── Sidebar nav tooltip / keyboard popup suppression ── */
+/* Hide the floating tooltip label that appears when touching nav icons */
+[data-testid="stSidebarNav"] a span[data-testid="stTooltipHoverTarget"],
+[data-testid="stSidebarNav"] a [class*="tooltip"],
+[data-testid="stSidebarNav"] [data-testid="tooltipContent"],
+[data-testid="stSidebarNav"] [data-testid="stTooltipContent"] { display: none !important; }
 
-/* ── Animations on appear ── */
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(16px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.block-container > div > div {
-  animation: fadeInUp 0.45s ease-out both;
-}
+/* Hide Streamlit’s keyboard shortcuts modal button (⌨ / ? button) */
+button[data-testid="keyboardShortcutButton"],
+[data-testid="keyboardShortcutModal"],
+[data-testid="keyboardShortcuts"],
+[aria-label="Keyboard shortcuts"] { display: none !important; }
 
-/* ── Pulse animation for alerts ── */
+/* Prevent sidebar nav <a> from showing native browser title-tooltip */
+[data-testid="stSidebarNav"] a { title: none; }
+
+/* Suppress any ::after tooltip injected by Streamlit on nav items */
+[data-testid="stSidebarNav"] li::after,
+[data-testid="stSidebarNav"] a::after { display: none !important; content: none !important; }
+
 @keyframes alertPulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--glow-sell); }
   50%       { box-shadow: 0 0 24px 4px var(--glow-sell); }
 }
 .qe-alert-pulse { animation: alertPulse 2s ease-in-out infinite; }
 
-/* ── Hover focus effect: sharpen foreground, dim background ── */
-.qe-hover-focus:hover { 
-  filter: brightness(1.1) !important;
-  z-index: 10 !important;
-}
-
-/* ── Spinner overlay ── */
-[data-testid="stSpinner"] > div {
-  border-color: var(--text-accent) transparent transparent transparent !important;
-}
-
-/* ── Checkbox ── */
-[data-testid="stCheckbox"] input[type="checkbox"] {
-  accent-color: var(--text-accent) !important;
-}
-
-/* ── Radio buttons ── */
-[data-testid="stRadio"] label {
-  text-transform: none !important;
-  font-size: 0.85rem !important;
-}
-
-/* ── Sidebar divider ── */
-[data-testid="stSidebar"] hr {
-  background: linear-gradient(90deg, transparent, rgba(11,224,255,0.2), transparent) !important;
-}
-
-/* ── Main content top divider animation ── */
 .qe-page-header {
   padding: 0 0 20px 0;
   border-bottom: 1px solid var(--border-glow);
@@ -579,7 +487,6 @@ code, pre {
   border-radius: 2px;
 }
 
-/* ── Neuroscience metric cards ── */
 .qe-metric-card {
   background: var(--bg-glass);
   border: 1px solid var(--border-dim);
@@ -624,7 +531,6 @@ code, pre {
 .qe-metric-value.positive { color: var(--accent-buy) !important; }
 .qe-metric-value.negative { color: var(--accent-sell) !important; }
 
-/* ── Signal badge ── */
 .qe-badge {
   display: inline-block;
   padding: 3px 10px;
@@ -639,7 +545,6 @@ code, pre {
 .qe-badge-sell { background: rgba(255,71,87,0.12);  border: 1px solid var(--accent-sell); color: var(--accent-sell); }
 .qe-badge-hold { background: rgba(255,215,0,0.1);   border: 1px solid var(--accent-gold); color: var(--accent-gold); }
 
-/* ── Regime environment indicator ── */
 .qe-regime-bull {
   background: radial-gradient(circle at 50% 50%, rgba(0,245,160,0.08), transparent 70%);
   border: 1px solid rgba(0,245,160,0.2);
@@ -669,7 +574,6 @@ code, pre {
   50%       { box-shadow: 0 0 30px 4px rgba(255,71,87,0.15); }
 }
 
-/* ── RL Agent trajectory ── */
 .qe-agent-card {
   background: var(--bg-glass);
   border: 1px solid rgba(165,94,253,0.25);
@@ -691,7 +595,6 @@ code, pre {
   100% { background-position: 200% 0; }
 }
 
-/* ── Prediction confidence cloud ── */
 .qe-confidence-cloud {
   background: rgba(11,224,255,0.04);
   border: 1px dashed rgba(11,224,255,0.2);
@@ -702,7 +605,6 @@ code, pre {
   font-family: var(--font-mono);
 }
 
-/* ── Risk gravity pit ── */
 .qe-risk-high {
   background: radial-gradient(ellipse at center, rgba(255,71,87,0.12) 0%, transparent 70%);
   border: 1px solid rgba(255,71,87,0.3);
@@ -710,14 +612,6 @@ code, pre {
   padding: 14px;
 }
 
-/* ── Loading skeleton ── */
-@keyframes skeletonPulse {
-  0%   { opacity: 0.4; }
-  50%  { opacity: 0.8; }
-  100% { opacity: 0.4; }
-}
-
-/* ── Toast notification ── */
 .qe-toast {
   position: fixed;
   bottom: 24px; right: 24px;
@@ -733,7 +627,7 @@ code, pre {
 }
 @keyframes toastSlideIn {
   from { transform: translateX(120%); opacity: 0; }
-  to   { transform: translateX(0);   opacity: 1; }
+  to   { transform: translateX(0);    opacity: 1; }
 }
 </style>
 """
@@ -741,7 +635,6 @@ code, pre {
 _JS = """
 <script>
 (function() {
-  // ── Hover focus effect: contextual blur ──────────────────────────────────
   function initHoverFocus() {
     const charts = document.querySelectorAll('[data-testid="stPlotlyChart"]');
     charts.forEach(chart => {
@@ -754,7 +647,6 @@ _JS = """
     });
   }
 
-  // ── Ripple on button click ───────────────────────────────────────────────
   function initRipple() {
     document.querySelectorAll('button').forEach(btn => {
       btn.addEventListener('click', function(e) {
@@ -782,7 +674,6 @@ _JS = """
     });
   }
 
-  // ── Particle burst on metric hover ──────────────────────────────────────
   function initMetricBurst() {
     document.querySelectorAll('[data-testid="stMetric"]').forEach(el => {
       el.addEventListener('mouseenter', function() {
@@ -798,7 +689,7 @@ _JS = """
           if (!document.getElementById('qe-particle-style')) {
             const s = document.createElement('style');
             s.id = 'qe-particle-style';
-            s.textContent = 
+            s.textContent =
               [0,1,2,3,4].map(n =>
                 `@keyframes particleBurst${n}{to{transform:translate(${(Math.random()-0.5)*60}px,${-40-Math.random()*40}px);opacity:0;}}`
               ).join('');
@@ -812,24 +703,26 @@ _JS = """
     });
   }
 
-  // ── Run after Streamlit renders ──────────────────────────────────────────
   function init() {
     initHoverFocus();
     initRipple();
     initMetricBurst();
   }
 
-  // Retry until DOM is ready
   let attempts = 0;
   const interval = setInterval(() => {
     if (document.querySelector('[data-testid="stMain"]') || ++attempts > 20) {
       clearInterval(interval);
       init();
-      // Re-run on navigation
+      // Re-init only for new elements added to stMain (not the whole body),
+      // with a longer debounce to avoid visual instability on page nav.
+      let debounceTimer = null;
       const observer = new MutationObserver(() => {
-        setTimeout(init, 300);
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(init, 600);
       });
-      observer.observe(document.body, { childList: true, subtree: true });
+      const mainEl = document.querySelector('[data-testid="stMain"]');
+      if (mainEl) observer.observe(mainEl, { childList: true, subtree: false });
     }
   }, 300);
 })();
@@ -837,17 +730,18 @@ _JS = """
 """
 
 
-def apply_quantedge_theme():
+def apply_quantedge_theme() -> None:
     """Inject the full QuantEdge cognitive UI theme into the current page."""
+    try:
+        st.logo("utils/logo.svg")
+    except AttributeError:
+        pass
     st.markdown(_CSS, unsafe_allow_html=True)
     st.markdown(_JS,  unsafe_allow_html=True)
 
 
 def qe_metric_cards(metrics: dict, cols: int = 4) -> None:
-    """
-    Render a row of neuroscience-styled metric cards.
-    metrics: dict of {label: value_string}
-    """
+    """Render a row of neuroscience-styled metric cards."""
     positive_keywords = ["cagr", "sharpe", "sortino", "return", "win", "ic"]
     negative_keywords = ["drawdown", "var", "cvar", "loss", "vol"]
 
@@ -859,7 +753,6 @@ def qe_metric_cards(metrics: dict, cols: int = 4) -> None:
             css_class = "positive"
         elif any(k in lk for k in negative_keywords):
             css_class = "negative"
-
         cards_html += f"""
         <div class="qe-metric-card">
           <div class="qe-metric-label">{label}</div>
@@ -871,26 +764,26 @@ def qe_metric_cards(metrics: dict, cols: int = 4) -> None:
 
 def qe_section_header(title: str, subtitle: str = "") -> None:
     """Render a styled section header with optional subtitle."""
-    html = f'''
+    sub_html = (
+        f'<div style="color:var(--text-dim);font-size:0.85rem;margin-top:6px;'
+        f'font-family:var(--font-mono);">{subtitle}</div>'
+        if subtitle else ""
+    )
+    st.markdown(f'''
     <div class="qe-page-header">
       <div style="color:var(--text-dim);font-family:var(--font-mono);
                   font-size:0.72rem;text-transform:uppercase;letter-spacing:2px;
-                  margin-bottom:6px;">
-        QuantEdge · Research Terminal
-      </div>
+                  margin-bottom:6px;">QuantEdge · Research Terminal</div>
       <div style="font-size:1.7rem;font-weight:700;
                   background:linear-gradient(135deg,#e8f4fd 0%,#0be0ff 60%,#a55efd 100%);
                   -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-                  background-clip:text;letter-spacing:-0.5px;">
-        {title}
-      </div>
-      {"" if not subtitle else f'<div style="color:var(--text-dim);font-size:0.85rem;margin-top:6px;font-family:var(--font-mono);">{subtitle}</div>'}
-    </div>'''
-    st.markdown(html, unsafe_allow_html=True)
+                  background-clip:text;letter-spacing:-0.5px;">{title}</div>
+      {sub_html}
+    </div>''', unsafe_allow_html=True)
 
 
 def qe_neon_divider() -> None:
-    """Render the neon divider that separates a page heading from its content."""
+    """Render an animated neon gradient divider between page sections."""
     st.markdown(
         """
         <div style="
@@ -899,7 +792,7 @@ def qe_neon_divider() -> None:
             margin: 14px 0 18px 0;
             border-radius: 999px;
             background: linear-gradient(90deg,
-                rgba(0,245,160,0.0) 0%,
+                rgba(0,245,160,0.0)  0%,
                 rgba(0,245,160,0.95) 18%,
                 rgba(11,224,255,0.95) 50%,
                 rgba(165,94,253,0.95) 82%,
@@ -914,7 +807,7 @@ def qe_neon_divider() -> None:
 
 
 def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
-    """Render a neon divider followed by a visible FAQ section."""
+    """Render a neon divider followed by a styled FAQ accordion."""
     qe_neon_divider()
     st.markdown(f"### {title}")
     for question, answer in faqs:
@@ -937,37 +830,33 @@ def qe_faq_section(title: str, faqs: list[tuple[str, str]]) -> None:
 
 
 def qe_regime_box(regime: str, recommendation: str = "") -> None:
-    """Render a regime environment indicator box."""
+    """Render a pulsing regime environment indicator box."""
     regime_lower = regime.lower()
     if "bull" in regime_lower:
-        css = "qe-regime-bull"
-        icon = "📈"
-        color = "var(--accent-buy)"
+        css, icon, color = "qe-regime-bull",     "📈", "var(--accent-buy)"
     elif "bear" in regime_lower:
-        css = "qe-regime-bear"
-        icon = "📉"
-        color = "var(--accent-sell)"
+        css, icon, color = "qe-regime-bear",     "📉", "var(--accent-sell)"
     else:
-        css = "qe-regime-sideways"
-        icon = "↔"
-        color = "var(--accent-gold)"
+        css, icon, color = "qe-regime-sideways", "↔",  "var(--accent-gold)"
 
-    html = f'''
+    rec_html = (
+        f'<div style="margin-top:10px;font-size:0.84rem;color:var(--text-dim);'
+        f'font-family:var(--font-mono);">{recommendation}</div>'
+        if recommendation else ""
+    )
+    st.markdown(f'''
     <div class="{css}" style="margin:12px 0;">
       <div style="font-size:0.72rem;font-family:var(--font-mono);text-transform:uppercase;
                   letter-spacing:1.5px;color:var(--text-dim);margin-bottom:8px;">
         Current Market Regime
       </div>
-      <div style="font-size:1.3rem;font-weight:700;color:{color};">
-        {icon} {regime}
-      </div>
-      {"" if not recommendation else f'<div style="margin-top:10px;font-size:0.84rem;color:var(--text-dim);font-family:var(--font-mono);">{recommendation}</div>'}
-    </div>'''
-    st.markdown(html, unsafe_allow_html=True)
+      <div style="font-size:1.3rem;font-weight:700;color:{color};">{icon} {regime}</div>
+      {rec_html}
+    </div>''', unsafe_allow_html=True)
 
 
 def apply_plotly_theme(fig, title: str = "", height: int = 500):
-    """Apply the QuantEdge dark theme to any Plotly figure."""
+    """Apply the QuantEdge dark Plotly theme to any figure."""
     fig.update_layout(
         **PLOTLY_LAYOUT,
         height=height,

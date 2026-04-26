@@ -1,12 +1,18 @@
 import sys
+import json
 from dataclasses import dataclass
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import streamlit as st
+try:
+    import streamlit as st
+except Exception:
+    from utils._stubs import st as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+from urllib import error as urlerror
+from urllib import request as urlrequest
 
 import core.backtest_engine as backtest_engine
 
@@ -161,7 +167,256 @@ except ImportError:
                 unsafe_allow_html=True,
             )
 
+def _latest_non_na(series: pd.Series, default: float = 0.0) -> float:
+    cleaned = series.dropna()
+    if cleaned.empty:
+        return default
+    return float(cleaned.iloc[-1])
+
+
+def _to_float(value, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.strip().replace(",", "")
+        if not cleaned:
+            return default
+        if cleaned.endswith("%"):
+            try:
+                return float(cleaned[:-1]) / 100.0
+            except ValueError:
+                return default
+        try:
+            return float(cleaned)
+        except ValueError:
+            return default
+    return default
+
+
+def _build_backtest_context(
+    ticker: str,
+    strategy: str,
+    market_name: str,
+    capital: float,
+    cost_model: _FallbackCostModel,
+    result,
+    bh_ret: pd.Series,
+    reg_res=None,
+    wf=None,
+    mc=None,
+) -> dict:
+    metrics = {k: result.metrics.get(k) for k in ["CAGR", "Sharpe", "Sortino", "Max Drawdown", "Win Rate", "Num Trades"]}
+    final_value = float(result.equity_curve.dropna().iloc[-1]) if hasattr(result, "equity_curve") and not result.equity_curve.dropna().empty else float(capital)
+    context = {
+        "ticker": ticker,
+        "strategy": strategy,
+        "market_name": market_name,
+        "initial_capital": float(capital),
+        "round_trip_cost": round(cost_model.total_round_trip_cost(), 6),
+        "slippage_bps": float(cost_model.slippage_bps),
+        "metrics": metrics,
+        "trade_count": int(len(result.trade_log)) if hasattr(result, "trade_log") else 0,
+        "final_portfolio_value": final_value,
+        "buy_and_hold_return": round(float((1 + bh_ret.fillna(0)).prod() - 1), 4) if len(bh_ret) else 0.0,
+        "regime_aware": reg_res is not None,
+        "walk_forward": wf is not None,
+        "monte_carlo": mc is not None,
+    }
+    if reg_res is not None:
+        context["regime_days"] = {
+            "bull": int(result.metrics.get("Bull Days", 0) or 0),
+            "sideways": int(result.metrics.get("Sideways Days", 0) or 0),
+            "bear": int(result.metrics.get("Bear Days", 0) or 0),
+        }
+    if wf is not None:
+        context["walk_forward_summary"] = {
+            "efficiency_ratio": round(float(getattr(wf, "efficiency_ratio", 0.0)), 3),
+            "overfit_warning": bool(getattr(wf, "overfit_warning", False)),
+        }
+    if mc is not None:
+        context["monte_carlo_summary"] = {
+            "prob_profit": round(float(getattr(mc, "prob_profit", 0.0)), 3),
+            "prob_beat_bh": round(float(getattr(mc, "prob_beat_bh", 0.0)), 3),
+            "risk_of_ruin": round(float(getattr(mc, "risk_of_ruin", 0.0)), 3),
+            "sharpe_ci_low": round(float(getattr(mc, "sharpe_ci_low", 0.0)), 3),
+            "sharpe_ci_high": round(float(getattr(mc, "sharpe_ci_high", 0.0)), 3),
+        }
+    return context
+
+
+def _compute_backtest_danger_flags(context: dict) -> list[dict]:
+    flags: list[dict] = []
+    metrics = context.get("metrics", {})
+    sharpe = _to_float(metrics.get("Sharpe"), 0.0)
+    max_dd = _to_float(metrics.get("Max Drawdown"), 0.0)
+    win_rate = _to_float(metrics.get("Win Rate"), 0.0)
+    num_trades = int(_to_float(metrics.get("Num Trades"), 0.0))
+    final_value = _to_float(context.get("final_portfolio_value"), 0.0)
+    capital = _to_float(context.get("initial_capital"), 0.0)
+
+    if sharpe < 0:
+        flags.append({
+            "severity": "DANGER",
+            "code": "NEGATIVE_SHARPE",
+            "message": f"Backtest Sharpe is {sharpe:.2f}, which means the strategy is not being rewarded for the risk it is taking.",
+        })
+    elif sharpe < 0.5:
+        flags.append({
+            "severity": "WARNING",
+            "code": "WEAK_SHARPE",
+            "message": f"Backtest Sharpe is only {sharpe:.2f}, which is a weak risk-adjusted result.",
+        })
+
+    if max_dd > 0.35:
+        flags.append({
+            "severity": "DANGER",
+            "code": "DEEP_DRAWDOWN",
+            "message": f"Maximum drawdown is {max_dd:.1%}, which is deep and painful to recover from.",
+        })
+    elif max_dd > 0.2:
+        flags.append({
+            "severity": "WARNING",
+            "code": "ELEVATED_DRAWDOWN",
+            "message": f"Maximum drawdown is {max_dd:.1%}, which is meaningful downside risk.",
+        })
+
+    if win_rate and win_rate < 0.45:
+        flags.append({
+            "severity": "WARNING",
+            "code": "LOW_WIN_RATE",
+            "message": f"Win rate is only {win_rate:.1%}, so the edge may depend on a few big wins.",
+        })
+
+    if num_trades < 10:
+        flags.append({
+            "severity": "INFO",
+            "code": "LOW_SAMPLE",
+            "message": f"Only {num_trades} completed trades are present, so the sample is small.",
+        })
+
+    if capital and final_value < capital:
+        flags.append({
+            "severity": "WARNING",
+            "code": "UNDERWATER",
+            "message": f"Final portfolio value {final_value:,.2f} is below starting capital {capital:,.2f}.",
+        })
+
+    wf_summary = context.get("walk_forward_summary")
+    if wf_summary:
+        if wf_summary.get("overfit_warning"):
+            flags.append({
+                "severity": "DANGER",
+                "code": "OVERFIT_WARNING",
+                "message": (
+                    f"Walk-forward efficiency ratio is {wf_summary.get('efficiency_ratio', 0.0):.2f}, "
+                    "so the strategy is likely overfit."
+                ),
+            })
+        elif wf_summary.get("efficiency_ratio", 1.0) < 0.5:
+            flags.append({
+                "severity": "WARNING",
+                "code": "WEAK_OOS",
+                "message": (
+                    f"Walk-forward efficiency ratio is only {wf_summary.get('efficiency_ratio', 0.0):.2f}, "
+                    "which suggests weak out-of-sample robustness."
+                ),
+            })
+
+    mc_summary = context.get("monte_carlo_summary")
+    if mc_summary:
+        if mc_summary.get("risk_of_ruin", 0.0) > 0.3:
+            flags.append({
+                "severity": "DANGER",
+                "code": "RISK_OF_RUIN",
+                "message": f"Monte Carlo risk of ruin is {mc_summary.get('risk_of_ruin', 0.0):.1%}, which is too high.",
+            })
+        elif mc_summary.get("prob_profit", 0.0) < 0.55:
+            flags.append({
+                "severity": "WARNING",
+                "code": "LOW_PROFIT_PROB",
+                "message": f"Monte Carlo probability of profit is only {mc_summary.get('prob_profit', 0.0):.1%}.",
+            })
+
+    return flags
+
+
+def _fallback_backtest_explanation(context: dict) -> str:
+    metrics = context.get("metrics", {})
+    flags = context.get("danger_flags", [])
+    flag_lines = ""
+    if flags:
+        flag_lines = "\n\n**Flags detected:**\n" + "\n".join(
+            f"- **{flag['severity']}** ({flag['code']}): {flag['message']}" for flag in flags
+        )
+    return (
+        f"### What the output says\n"
+        f"The {context.get('strategy', 'strategy')} backtest on {context.get('ticker', 'the ticker')} shows a CAGR of {metrics.get('CAGR', 'N/A')}, "
+        f"Sharpe of {metrics.get('Sharpe', 'N/A')}, and max drawdown of {metrics.get('Max Drawdown', 'N/A')}.\n\n"
+        f"### What each number means\n"
+        f"- **Sharpe**: risk-adjusted return quality.\n"
+        f"- **Max Drawdown**: worst peak-to-trough loss.\n"
+        f"- **Win Rate**: share of winning trades.\n"
+        f"- **Num Trades**: how many completed trades the strategy took.\n"
+        f"- **Round-trip cost**: {context.get('round_trip_cost', 0.0):.4%}.\n"
+        f"{flag_lines}\n\n"
+        f"### Plain English conclusion\n"
+        f"This backtest is only as useful as its out-of-sample robustness and cost realism.\n\n"
+        f"⚠️ This explanation is generated from dashboard outputs only. It is not financial advice."
+    )
+
+
+def _call_gemini_explainer(context: dict) -> str:
+    gemini_api_key = getattr(cfg, "GEMINI_API_KEY", "")
+    gemini_model = getattr(cfg, "GEMINI_MODEL", "gemini-1.5-flash")
+
+    if not gemini_api_key:
+        return _fallback_backtest_explanation(context)
+
+    system_prompt = (
+        "You are a quant analyst inside a trading backtester. "
+        "Explain the displayed backtest output in simple English for non-technical users. "
+        "Only use the numbers and labels in the provided context. "
+        "Do not invent new signals, do not give financial advice, and do not overstate certainty. "
+        "Return exactly 4 short sections with these headings: Summary, Main Drivers, Risk Checks, Plain-English Takeaway."
+    )
+    user_prompt = json.dumps(context, indent=2, default=str)
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "topP": 0.9,
+            "maxOutputTokens": 350,
+        },
+    }
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{gemini_model}:generateContent?key={gemini_api_key}"
+    )
+    req = urlrequest.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        candidates = data.get("candidates", [])
+        if not candidates:
+            return _fallback_backtest_explanation(context)
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = "".join(part.get("text", "") for part in parts).strip()
+        return text or _fallback_backtest_explanation(context)
+    except (urlerror.URLError, TimeoutError, ValueError, KeyError) as exc:
+        return _fallback_backtest_explanation(context) + f" (Gemini explanation unavailable: {exc.__class__.__name__})"
+
+
 st.set_page_config(page_title="Backtest | QuantEdge", layout="wide")
+from app.shared import apply_theme
+apply_theme()
 st.title("⚡ Strategy Backtester")
 qe_neon_divider()
 
@@ -228,12 +483,38 @@ train_mo = wr[0].number_input("Train window (months)", 12, 60, 36, disabled=not 
 test_mo  = wr[1].number_input("Test window (months)",   3, 18,  6, disabled=not do_wf)
 n_sims   = wr[2].number_input("MC simulations",       200, 2000, 500, disabled=not do_mc)
 
+backtest_run_key = json.dumps(
+    {
+        "ticker": ticker,
+        "strategy": strategy,
+        "market_name": market_name,
+        "capital": capital,
+        "p1": p1,
+        "p2": p2,
+        "bull_s": bull_s,
+        "side_s": side_s,
+        "bear_s": bear_s,
+        "do_wf": do_wf,
+        "do_mc": do_mc,
+        "do_mat": do_mat,
+        "train_mo": int(train_mo),
+        "test_mo": int(test_mo),
+        "n_sims": int(n_sims),
+    },
+    sort_keys=True,
+    default=str,
+)
+
 # ── Load data ─────────────────────────────────────────────────────────────────
 with st.spinner("Loading data..."):
     df = load_ticker_data(ticker, start=str(start))
 
 # ── RUN ───────────────────────────────────────────────────────────────────────
-if st.button("Run Backtest", type="primary"):
+run_clicked = st.button("Run Backtest", type="primary")
+if st.session_state.get("backtest_last_run_key") == backtest_run_key and st.session_state.get("backtest_last_run_key") is not None:
+    run_clicked = True
+
+if run_clicked:
 
     bcfg = BacktestConfig(
         initial_capital=capital,
@@ -244,6 +525,8 @@ if st.button("Run Backtest", type="primary"):
     )
 
     with st.spinner("Running backtest..."):
+        wf = None
+        mc = None
         if strategy == "Momentum":
             signal = momentum_strategy(df, lookback=p1)
         elif strategy == "Mean Reversion":
@@ -269,6 +552,8 @@ if st.button("Run Backtest", type="primary"):
             reg_res = None
 
     bh_ret = returns(df)
+    st.session_state.backtest_ai_summary = ""
+    st.session_state.backtest_last_run_key = backtest_run_key
 
     # ── Section 1: Base Results ───────────────────────────────────────────────
     st.markdown("---")
@@ -463,6 +748,90 @@ if st.button("Run Backtest", type="primary"):
     with st.expander("Full Metrics Table"):
         st.dataframe(pd.DataFrame.from_dict(result.metrics, orient="index",
                                              columns=["Value"]), use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("AI Backtest Decoder")
+    st.caption(
+        "Optional plain-English layer. It explains the already-computed backtest output "
+        "and does not change the underlying strategy."
+    )
+
+    backtest_context = _build_backtest_context(
+        ticker=ticker,
+        strategy=strategy,
+        market_name=market_name,
+        capital=float(capital),
+        cost_model=cost_model,
+        result=result,
+        bh_ret=bh_ret,
+        reg_res=reg_res,
+        wf=wf,
+        mc=mc,
+    )
+    backtest_context["danger_flags"] = _compute_backtest_danger_flags(backtest_context)
+
+    if backtest_context["danger_flags"]:
+        n_danger = sum(1 for f in backtest_context["danger_flags"] if f["severity"] == "DANGER")
+        n_warning = sum(1 for f in backtest_context["danger_flags"] if f["severity"] == "WARNING")
+        n_info = sum(1 for f in backtest_context["danger_flags"] if f["severity"] == "INFO")
+        badge_html = ""
+        if n_danger:
+            badge_html += f'<span style="background:#dc3232;color:#fff;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:600;margin-right:6px;">⛔ {n_danger} DANGER</span>'
+        if n_warning:
+            badge_html += f'<span style="background:#e67e00;color:#fff;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:600;margin-right:6px;">⚠️ {n_warning} WARNING</span>'
+        if n_info:
+            badge_html += f'<span style="background:#1a6fa0;color:#fff;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:600;">ℹ️ {n_info} INFO</span>'
+
+        st.markdown(f'<div style="margin:10px 0 6px;">{badge_html}</div>', unsafe_allow_html=True)
+        for flag in backtest_context["danger_flags"]:
+            color_map = {"DANGER": "#dc3232", "WARNING": "#e67e00", "INFO": "#1a6fa0"}
+            bg_map = {"DANGER": "rgba(220,50,50,0.08)", "WARNING": "rgba(230,126,0,0.08)", "INFO": "rgba(26,111,160,0.08)"}
+            st.markdown(
+                f"""<div style="
+                    background:{bg_map[flag['severity']]};
+                    border-left:3px solid {color_map[flag['severity']]};
+                    border-radius:0 6px 6px 0;
+                    padding:10px 14px;
+                    margin:6px 0;
+                    font-size:13px;
+                    line-height:1.55;
+                ">
+                  <span style="font-weight:700;color:{color_map[flag['severity']]};">{flag['severity']} · {flag['code']}</span><br>
+                  {flag['message']}
+                </div>""",
+                unsafe_allow_html=True,
+            )
+    else:
+        st.success("✅ Pre-flight checks passed — no critical flags detected for this backtest.")
+
+    if "backtest_ai_summary" not in st.session_state:
+        st.session_state.backtest_ai_summary = ""
+
+    decode_clicked = st.button(
+        "Decode Backtest in Simple Terms",
+        type="primary",
+        key="backtest_ai_explain",
+        use_container_width=True,
+        help="Generate a plain-English explanation of the backtest output above.",
+    )
+    clear_clicked = st.button(
+        "Clear explanation",
+        key="backtest_ai_clear",
+        use_container_width=True,
+    )
+
+    if clear_clicked:
+        st.session_state.backtest_ai_summary = ""
+
+    if decode_clicked:
+        with st.spinner("The AI is reading the backtest and writing your plain-English explanation..."):
+            st.session_state.backtest_ai_summary = _call_gemini_explainer(backtest_context)
+
+    if st.session_state.get("backtest_ai_summary"):
+        st.markdown("#### Result")
+        st.markdown(st.session_state.backtest_ai_summary)
+    else:
+        st.info("Click **Decode Backtest in Simple Terms** to generate a plain-English summary of the current backtest.")
 
 qe_faq_section("FAQs", [
     ("What should I run first on the backtester?", "Start with the default strategy and review the equity curve, drawdown, and trade log before trying more advanced settings."),

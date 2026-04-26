@@ -4,7 +4,6 @@ from app import shared as _shared
 
 DARK_CSS = _shared.DARK_CSS
 apply_theme = _shared.apply_theme
-render_data_engine_sidebar = _shared.render_data_engine_sidebar
 _start_str = _shared._start_str
 _ticker_sb = _shared._ticker_sb
 _tickers_sb = _shared._tickers_sb
@@ -15,7 +14,6 @@ _top_bar = _shared._top_bar
 __all__ = [
     "DARK_CSS",
     "apply_theme",
-    "render_data_engine_sidebar",
     "_start_str",
     "_ticker_sb",
     "_tickers_sb",

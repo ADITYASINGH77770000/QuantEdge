@@ -26,119 +26,19 @@ from core.indicators import rsi as rsi_series
 from utils.config import cfg
 
 # ── Dark theme CSS ─────────────────────────────────────────────────────────────
-DARK_CSS = """
-<style>
-html, body,
-[data-testid="stAppViewContainer"],
-[data-testid="stApp"],
-section.main, .main .block-container {
-    background-color: #0e1117 !important;
-    color: #e0e0e0 !important;
-}
-[data-testid="stHeader"] { background: #0e1117 !important; }
-[data-testid="stSidebar"] > div:first-child {
-    background-color: #161b27 !important;
-    border-right: 1px solid #252d3e;
-}
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] p,
-[data-testid="stSidebar"] span { color: #c8ccd8 !important; }
-
-[data-testid="stTextInput"] input,
-[data-testid="stNumberInput"] input {
-    background-color: #1a2035 !important;
-    color: #e0e0e0 !important;
-    border-color: #2a3350 !important;
-}
-[data-testid="stButton"] > button {
-    background: #1565c0 !important; color: #fff !important;
-    border: none !important; border-radius: 7px !important;
-    font-weight: 600 !important;
-}
-[data-testid="stButton"] > button:hover { background: #1976d2 !important; }
-[data-testid="stButton"] > button[kind="secondary"] {
-    background: #1e2840 !important; color: #c8ccd8 !important;
-}
-[data-testid="metric-container"] {
-    background: #161b27 !important;
-    border: 1px solid #252d3e !important;
-    border-radius: 10px !important;
-    padding: 14px 18px !important;
-}
-[data-testid="stMetricLabel"] > div { color: #7a8099 !important; font-size: 12px !important; }
-[data-testid="stMetricValue"] > div { color: #e8ecf4 !important; font-weight: 600 !important; }
-[data-testid="stTabs"] [role="tablist"] { border-bottom: 1px solid #252d3e !important; }
-[data-testid="stTabs"] [role="tab"] {
-    color: #7a8099 !important; font-size: 13px !important; padding: 8px 16px !important;
-}
-[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-    color: #4fc3f7 !important;
-    border-bottom: 2px solid #4fc3f7 !important;
-    font-weight: 600 !important;
-}
-[data-testid="stExpander"] {
-    border: 1px solid #252d3e !important;
-    border-radius: 8px !important;
-    background: #161b27 !important;
-}
-[data-testid="stDataFrame"] { background: #161b27 !important; }
-hr { border-color: #252d3e !important; }
-
-/* ── Top metrics bar ──────────────────────────────────────────── */
-.qe-top-bar {
-    display: flex; flex-wrap: wrap; gap: 10px;
-    padding: 10px 0 16px 0;
-    border-bottom: 1px solid #252d3e;
-    margin-bottom: 20px;
-}
-.qe-chip {
-    background: #161b27; border: 1px solid #252d3e; border-radius: 8px;
-    padding: 8px 16px; display: flex; flex-direction: column; min-width: 120px;
-}
-.qe-chip-label {
-    color: #5a6180; font-size: 11px; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.04em;
-}
-.qe-chip-value { color: #e0e0e0; font-size: 15px; font-weight: 600; }
-.qe-pos  { color: #2ecc71 !important; font-weight: 700 !important; }
-.qe-neg  { color: #e74c3c !important; font-weight: 700 !important; }
-.qe-warn { color: #f0c040 !important; font-weight: 700 !important; }
-.qe-buy  { color: #2ecc71 !important; font-weight: 700 !important; }
-.qe-sell { color: #e74c3c !important; font-weight: 700 !important; }
-.qe-hold { color: #f0c040 !important; font-weight: 700 !important; }
-
-/* ── Page elements ────────────────────────────────────────────── */
-.qe-page-title { font-size: 22px; font-weight: 700; color: #e8ecf4; margin-bottom: 2px; }
-.qe-page-sub   { color: #5a6180; font-size: 13px; margin-bottom: 14px; }
-.qe-sb-section {
-    font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em;
-    text-transform: uppercase; color: #3d4560 !important; padding: 10px 0 4px 0;
-}
-.qe-logo {
-    font-size: 18px; font-weight: 700; color: #4fc3f7 !important;
-    display: flex; align-items: center; gap: 8px; padding-bottom: 14px;
-}
-.qe-demo-pill {
-    background: #163556; color: #4fc3f7 !important; font-size: 10px;
-    padding: 2px 7px; border-radius: 999px; font-weight: 600;
-}
-</style>
-"""
-
+DARK_CSS = ""
 
 def apply_theme():
-    """Inject the dark CSS. Call once at the top of every page."""
-    st.markdown(DARK_CSS, unsafe_allow_html=True)
-    # Logo in sidebar
-    demo_pill = '<span class="qe-demo-pill">DEMO</span>' if cfg.DEMO_MODE else ""
-    st.sidebar.markdown(
-        f'<div class="qe-logo">📊 QuantEdge {demo_pill}</div>',
-        unsafe_allow_html=True,
-    )
-
+    """Inject the dark CSS via the unified utils.theme engine."""
+    from utils.theme import apply_quantedge_theme
+    apply_quantedge_theme()
 
 def render_data_engine_sidebar():
-    """Data Engine section in sidebar (Static/Live mode, start date, interval)."""
+    """Branded nav + Data Engine section in sidebar — called by every page."""
+
+    st.sidebar.divider()
+
+    # ── Data Engine controls ───────────────────────────────────────────────────
     _sb_sec("Data Engine")
     data_mode = st.sidebar.radio("Mode", ["Static", "Live"], key="qe_data_mode", horizontal=True)
     if data_mode == "Static":
@@ -180,23 +80,7 @@ def _header(title: str, subtitle: str = ""):
     if subtitle:
         st.markdown(f'<div class="qe-page-sub">{subtitle}</div>', unsafe_allow_html=True)
     st.markdown(
-        """
-        <div style="
-            height: 2px;
-            width: 100%;
-            margin: 14px 0 18px 0;
-            border-radius: 999px;
-            background: linear-gradient(90deg,
-                rgba(0,245,160,0.0) 0%,
-                rgba(0,245,160,0.95) 18%,
-                rgba(11,224,255,0.95) 50%,
-                rgba(165,94,253,0.95) 82%,
-                rgba(165,94,253,0.0) 100%);
-            box-shadow:
-                0 0 10px rgba(11,224,255,0.55),
-                0 0 24px rgba(165,94,253,0.25);
-        "></div>
-        """,
+        '<hr style="border:none;height:1px;background:#252d3e;margin:10px 0 18px 0;">',
         unsafe_allow_html=True,
     )
 
