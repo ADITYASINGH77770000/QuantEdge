@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Keeps the Render free instance from hibernating.
+#
+# Render spins a free web service down after ~15 minutes without traffic. Waking
+# it again takes 60-90 seconds, and sometimes fails outright with
+# `x-render-routing: hibernate-wake-error` — which is what makes the portal's
+# login return 503: the browser gives up long before the API answers.
+#
+# Pinging every 10 minutes keeps it warm. One always-on free service uses about
+# 730 of the 750 free instance-hours in a month, so this fits the quota — but
+# only just, and only while this is the ONLY free service on the account.
+#
+# Actions minutes are unlimited on public repositories, so this costs nothing.
+# GitHub disables scheduled workflows after 60 days of repository inactivity;
+# push anything, or run it manually, to re-enable.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Keep API awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keep-api-awake
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping the API
+        run: |
+          URL="https://alphaforge-api-umrl.onrender.com/api/config"
+          # A cold wake can take ~90s, so allow well past that before failing.
+          code=$(curl -sS -o /dev/null -w "%{http_code}" -m 150 "$URL" || echo "000")
+          echo "GET $URL -> HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::warning::API returned $code — it may be waking, suspended, or out of free hours."
+          fi
